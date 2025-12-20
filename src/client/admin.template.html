@@ -198,6 +198,7 @@
     $('logout').onclick = () => {
       clearSessionToken();
       authInfoEl.textContent = 'Logged out. Please login.';
+      refresh().catch(() => {});
     };
 
     $('saveToken').onclick = async () => {
@@ -226,6 +227,7 @@
       tokenEl.value = '';
       enforceSessionFreshness();
       statusEl.textContent = 'Logged in.';
+      await refresh();
     };
 
     async function api(path, options = {}) {
