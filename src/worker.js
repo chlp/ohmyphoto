@@ -89,20 +89,6 @@ export default {
         return new Response(obj.body, { headers });
       }
   
-      // Serve static assets (including index.html for album routes)
-      // For routes like /as, /a/<albumId>, etc., serve index.html
-      if (request.method === "GET" && env.ASSETS) {
-        // If the path doesn't start with /api or /img, try to serve as static asset
-        // If asset not found, serve index.html (for SPA-like behavior)
-        const assetResponse = await env.ASSETS.fetch(request);
-        if (assetResponse.status === 404) {
-          // Serve index.html for any non-API, non-image route
-          const indexRequest = new Request(new URL("/index.html", request.url), request);
-          return env.ASSETS.fetch(indexRequest);
-        }
-        return assetResponse;
-      }
-  
       return new Response("Not found", { status: 404 });
     }
   };
