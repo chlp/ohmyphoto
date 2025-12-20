@@ -42,8 +42,6 @@ export default {
           .filter(k => k !== prefix) // just in case
           .map(k => {
             const name = k.substring(prefix.length);
-            // assume preview key: albums/<id>/preview/<name>_preview.jpg (or other)
-            // minimally: let preview = albums/<id>/preview/<name>
             return {
               name,
               photoUrl: `/img/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(name)}`,
@@ -63,7 +61,7 @@ export default {
           "Referrer-Policy": "no-referrer"
         });
       }
-  
+
       // GET /img/<albumId>/(photos|preview)/<name>
       const mImg = path.match(/^\/img\/([^/]+)\/(photos|preview)\/(.+)$/);
       if (mImg && request.method === "GET") {
@@ -81,10 +79,7 @@ export default {
         headers.set("X-Robots-Tag", "noindex, nofollow");
   
         // minimally: cache for an hour for preview/photo (can be configured)
-        headers.set("Cache-Control", kind === "preview"
-          ? "public, max-age=86400"
-          : "public, max-age=3600"
-        );
+        headers.set("Cache-Control", "public, max-age=3600");
   
         return new Response(obj.body, { headers });
       }

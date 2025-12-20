@@ -38,9 +38,6 @@
         return;
       }
 
-      // optionally: remove hash from address bar after reading
-      history.replaceState(null, '', location.pathname + location.search);
-
       statusEl.textContent = 'Loading...';
 
       const resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
