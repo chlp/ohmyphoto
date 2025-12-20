@@ -15,3 +15,11 @@ watch_dir = "src/client"
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "ohmyphoto"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RateLimiterDO"]
