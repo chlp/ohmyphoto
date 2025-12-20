@@ -19,7 +19,7 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
 
 ## Bot protection (Cloudflare Turnstile captcha)
 
-See `TURNSTILE_SETUP.md`.
+See [TURNSTILE_SETUP.md](./TURNSTILE_SETUP.md).
 
 ## Local run
 

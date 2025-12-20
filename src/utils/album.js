@@ -3,7 +3,7 @@
  * @param {string} albumId
  * @param {string} secret
  * @param {Object} env - Environment с BUCKET
- * @returns {Promise<{success: true, info: Object}|{success: false, response: Response}>}
+ * @returns {Promise<{success: true, info: Object, matchedSecret: string}|{success: false, response: Response}>}
  */
 export async function checkAlbumSecret(albumId, secret, env) {
   const infoKey = `albums/${albumId}/info.json`;
@@ -26,10 +26,20 @@ export async function checkAlbumSecret(albumId, secret, env) {
     };
   }
   
-  const expected = String(info?.secret || "");
   const providedSecret = String(secret || "");
-  
-  if (!expected || providedSecret !== expected) {
+
+  // Support both formats:
+  // - info.secret: "..."
+  // - info.secrets: { "<secret1>": {}, "<secret2>": {} }
+  const secrets = new Set();
+  if (info && typeof info.secret === "string" && info.secret) secrets.add(info.secret);
+  if (info && info.secrets && typeof info.secrets === "object") {
+    for (const k of Object.keys(info.secrets)) {
+      if (k) secrets.add(k);
+    }
+  }
+
+  if (!providedSecret || !secrets.has(providedSecret)) {
     return {
       success: false,
       response: new Response("Invalid secret", { status: 403 })
@@ -38,7 +48,8 @@ export async function checkAlbumSecret(albumId, secret, env) {
   
   return {
     success: true,
-    info
+    info,
+    matchedSecret: providedSecret
   };
 }
 

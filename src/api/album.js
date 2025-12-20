@@ -1,6 +1,7 @@
 import { checkAlbumSecret } from '../utils/album.js';
 import { json } from '../utils/response.js';
 import { verifyTurnstileToken } from '../utils/turnstile.js';
+import { imageSig } from '../utils/crypto.js';
 
 /**
  * Handle POST /api/album/<albumId>
@@ -33,6 +34,7 @@ export async function handleAlbumRequest(request, env, albumId) {
     return checkResult.response;
   }
   const info = checkResult.info;
+  const matchedSecret = checkResult.matchedSecret;
 
   // LIST photos/
   const prefix = `albums/${albumId}/photos/`;
@@ -41,19 +43,23 @@ export async function handleAlbumRequest(request, env, albumId) {
   const files = listed.objects
     .map(o => o.key)
     .filter(k => k !== prefix) // just in case
-    .map(k => {
+    .map(async (k) => {
       const name = k.substring(prefix.length);
+      const sig = await imageSig(albumId, name, matchedSecret);
+      const qs = `?s=${sig}`;
       return {
         name,
-        photoUrl: `/img/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(name)}`,
-        previewUrl: `/img/${encodeURIComponent(albumId)}/preview/${encodeURIComponent(name)}`
+        photoUrl: `/img/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(name)}${qs}`,
+        previewUrl: `/img/${encodeURIComponent(albumId)}/preview/${encodeURIComponent(name)}${qs}`
       };
     });
+
+  const resolvedFiles = await Promise.all(files);
 
   const resp = {
     albumId,
     title: String(info?.title || ""),
-    files
+    files: resolvedFiles
   };
 
   return json(resp, 200, {
