@@ -12,8 +12,8 @@
   <h1 id="title">Album</h1>
   <div id="status"></div>
   <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
-  <!-- Invisible Turnstile widget -->
-  <div id="turnstile-widget" style="display: none;"></div>
+  <!-- Turnstile widget container (kept off-screen to avoid layout impact) -->
+  <div id="turnstile-widget" style="position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;"></div>
 
   <script>
     function getAlbumIdFromPath() {
@@ -48,21 +48,16 @@
       let turnstileToken = '';
       if (TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY !== 'YOUR_TURNSTILE_SITE_KEY') {
         try {
-          // Wait for Turnstile script to load (with timeout)
-          await Promise.race([
-            new Promise(resolve => {
-              if (typeof turnstile !== 'undefined') {
-                resolve();
-              } else {
-                window.addEventListener('load', () => {
-                  if (typeof turnstile !== 'undefined') {
-                    resolve();
-                  }
-                });
-              }
-            }),
-            new Promise(resolve => setTimeout(resolve, 3000)) // 3 second timeout
-          ]);
+          // Wait for Turnstile script to load (poll with timeout)
+          await new Promise((resolve) => {
+            const startedAt = Date.now();
+            const tick = () => {
+              if (typeof turnstile !== 'undefined') return resolve();
+              if (Date.now() - startedAt > 3000) return resolve(); // 3s timeout
+              setTimeout(tick, 50);
+            };
+            tick();
+          });
 
           if (typeof turnstile !== 'undefined') {
             turnstileToken = await new Promise((resolve) => {
@@ -74,7 +69,7 @@
                 }
               }, 5000);
 
-              const widgetId = turnstile.render('turnstile-widget', {
+              const widgetId = turnstile.render('#turnstile-widget', {
                 sitekey: TURNSTILE_SITE_KEY,
                 callback: (token) => {
                   if (!resolved) {
@@ -90,11 +85,15 @@
                     resolve(''); // Continue without token on error
                   }
                 },
-                size: 'invisible'
+                // Current Turnstile JS API accepts: "compact" | "flexible" | "normal"
+                size: 'normal',
+                // Avoid auto-execution; we will execute explicitly once.
+                execution: 'execute'
               });
 
-              // Execute invisible challenge
-              turnstile.execute(widgetId);
+              // Execute the challenge once (reset first to avoid "already executing" warnings)
+              try { turnstile.reset(widgetId); } catch {}
+              try { turnstile.execute(widgetId); } catch { resolve(''); }
             });
           }
         } catch (err) {
