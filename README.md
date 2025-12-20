@@ -21,6 +21,12 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
 
 See [TURNSTILE_SETUP.md](./TURNSTILE_SETUP.md).
 
+## Admin (create/update/rename/delete albums)
+
+Open `./admin.html` (for example: `http://127.0.0.1:8787/admin.html` when running locally).
+
+Admin API is protected with `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TOKEN` as a Worker secret in production).
+
 ## Local run
 
 ```bash

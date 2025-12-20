@@ -13,6 +13,10 @@ function extractSecrets(info) {
   return [...secrets];
 }
 
+export function invalidateAlbumCache(albumId) {
+  albumInfoCache.delete(albumId);
+}
+
 /**
  * Load album info.json and extract all secrets, with an in-memory TTL cache.
  * @param {string} albumId

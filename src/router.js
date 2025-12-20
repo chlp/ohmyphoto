@@ -1,5 +1,6 @@
 import { handleAlbumRequest } from './api/album.js';
 import { handleImageRequest } from './api/image.js';
+import { handleAdminRequest } from './api/admin.js';
 
 /**
  * Router for handling different routes
@@ -7,6 +8,11 @@ import { handleImageRequest } from './api/image.js';
 export async function route(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
+
+  // /api/admin/*
+  if (path.startsWith("/api/admin/")) {
+    return handleAdminRequest(request, env);
+  }
 
   // POST /api/album/<albumId>
   const mApi = path.match(/^\/api\/album\/([^/]+)$/);
