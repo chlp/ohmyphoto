@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>OhMyPhoto Admin</title>
   <meta name="robots" content="noindex,nofollow" />
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
     input, textarea, button { font: inherit; }
@@ -24,6 +25,9 @@
 </head>
 <body>
   <h1>OhMyPhoto Admin</h1>
+
+  <!-- Turnstile widget container (kept off-screen to avoid layout impact) -->
+  <div id="turnstile-widget" style="position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;"></div>
 
   <div class="card">
     <h2>Auth</h2>
@@ -75,6 +79,9 @@
     const statusEl = $('status');
     const authInfoEl = $('authInfo');
 
+    // Cloudflare Turnstile site key (injected by build step)
+    const TURNSTILE_SITE_KEY = '__TURNSTILE_SITE_KEY__';
+
     function base64UrlDecodeToJson(b64url) {
       try {
         const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
@@ -83,6 +90,60 @@
         return JSON.parse(jsonStr);
       } catch {
         return null;
+      }
+    }
+
+    async function getTurnstileTokenOnce() {
+      if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY === 'YOUR_TURNSTILE_SITE_KEY') return '';
+      try {
+        // Wait for Turnstile script to load (poll with timeout)
+        await new Promise((resolve) => {
+          const startedAt = Date.now();
+          const tick = () => {
+            if (typeof turnstile !== 'undefined') return resolve();
+            if (Date.now() - startedAt > 3000) return resolve(); // 3s timeout
+            setTimeout(tick, 50);
+          };
+          tick();
+        });
+
+        if (typeof turnstile === 'undefined') return '';
+
+        return await new Promise((resolve) => {
+          let resolved = false;
+          const timeout = setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              resolve(''); // Timeout - continue without token
+            }
+          }, 5000);
+
+          const widgetId = turnstile.render('#turnstile-widget', {
+            sitekey: TURNSTILE_SITE_KEY,
+            callback: (token) => {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                resolve(token);
+              }
+            },
+            'error-callback': () => {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                resolve(''); // Continue without token on error
+              }
+            },
+            size: 'normal',
+            execution: 'execute'
+          });
+
+          try { turnstile.reset(widgetId); } catch {}
+          try { turnstile.execute(widgetId); } catch { resolve(''); }
+        });
+      } catch (err) {
+        console.warn('Turnstile verification failed:', err);
+        return '';
       }
     }
 
@@ -146,10 +207,11 @@
         return;
       }
       statusEl.textContent = 'Logging in...';
+      const turnstileToken = await getTurnstileTokenOnce();
       const resp = await fetch('/api/admin/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: adminToken })
+        body: JSON.stringify({ token: adminToken, turnstileToken })
       });
       if (!resp.ok) {
         statusEl.textContent = `Login failed: ${resp.status}`;

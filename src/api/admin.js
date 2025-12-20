@@ -2,6 +2,7 @@ import { json } from '../utils/response.js';
 import { getAlbumInfoWithSecrets } from '../utils/album.js';
 import { invalidateAlbumCache } from '../utils/album.js';
 import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/session.js';
+import { verifyTurnstileToken } from '../utils/turnstile.js';
 
 function unauthorized() {
   return new Response("Unauthorized", {
@@ -20,8 +21,12 @@ async function authorizeAdmin(request, env) {
   const token = m ? m[1] : "";
   if (!token) return unauthorized();
 
-  // Allow using the raw ADMIN_TOKEN for non-browser tooling (curl/scripts)
-  if (token === expected) return null;
+  // Optional escape hatch for non-browser tooling (curl/scripts).
+  // WARNING: enabling this makes ADMIN_TOKEN brute-forceable on any /api/admin/* endpoint.
+  const allowRaw = String(env.ADMIN_TOKEN_ALLOW_RAW || "").toLowerCase();
+  if ((allowRaw === "1" || allowRaw === "true" || allowRaw === "yes") && token === expected) {
+    return null;
+  }
 
   // Otherwise treat as a signed session token
   const v = await verifyAdminSessionToken(token, expected);
@@ -158,8 +163,22 @@ export async function handleAdminRequest(request, env) {
     const body = await readJson(request);
     if (!body) return badRequest("Bad JSON");
     const provided = String(body.token || body.adminToken || "");
+    const turnstileToken = String(body.turnstileToken || "");
     const expected = String(env.ADMIN_TOKEN || "");
     if (!expected) return unauthorized();
+
+    // Verify Turnstile token if secret key is configured
+    if (env.TURNSTILE_SECRET_KEY) {
+      if (!turnstileToken) {
+        return new Response("Bot verification required", { status: 403 });
+      }
+      const clientIP = request.headers.get('CF-Connecting-IP') || null;
+      const turnstileResult = await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET_KEY, clientIP);
+      if (!turnstileResult.success) {
+        return new Response("Bot verification failed", { status: 403 });
+      }
+    }
+
     if (!provided || provided !== expected) return unauthorized();
 
     const issued = await issueAdminSessionToken(expected);
