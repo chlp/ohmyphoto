@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Album</title>
+  <meta name="robots" content="noindex,nofollow" />
+</head>
+<body>
+  <h1 id="title">Album</h1>
+  <div id="status"></div>
+  <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
+
+  <script>
+    function getAlbumIdFromPath() {
+      // expect /a/<albumId>
+      const parts = location.pathname.split('/').filter(Boolean);
+      const aIdx = parts.indexOf('a');
+      if (aIdx >= 0 && parts[aIdx + 1]) return parts[aIdx + 1];
+      // fallback: first segment
+      return parts[0] || '';
+    }
+
+    async function main() {
+      const albumId = getAlbumIdFromPath();
+      const secret = (location.hash || '').replace(/^#/, '');
+
+      const statusEl = document.getElementById('status');
+      const gridEl = document.getElementById('grid');
+      const titleEl = document.getElementById('title');
+
+      if (!albumId) {
+        statusEl.textContent = 'No albumId in URL. Expected /a/<albumId>#<secret>';
+        return;
+      }
+      if (!secret) {
+        statusEl.textContent = 'No secret in URL hash. Expected /a/<albumId>#<secret>';
+        return;
+      }
+
+      // optionally: remove hash from address bar after reading
+      history.replaceState(null, '', location.pathname + location.search);
+
+      statusEl.textContent = 'Loading...';
+
+      const resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret })
+      });
+
+      if (resp.status === 404) {
+        statusEl.textContent = 'Album not found (404)';
+        return;
+      }
+      if (resp.status === 403) {
+        statusEl.textContent = 'Forbidden (403): wrong secret';
+        return;
+      }
+      if (!resp.ok) {
+        statusEl.textContent = `Error: ${resp.status}`;
+        return;
+      }
+
+      const data = await resp.json();
+      titleEl.textContent = data.title || `Album ${albumId}`;
+      statusEl.textContent = `Files: ${data.files.length}`;
+
+      // Render previews if worker returns previewUrl
+      gridEl.innerHTML = '';
+      for (const f of data.files) {
+        const wrap = document.createElement('div');
+        wrap.style.border = '1px solid #ddd';
+        wrap.style.padding = '8px';
+
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.style.width = '100%';
+        img.style.height = '160px';
+        img.style.objectFit = 'cover';
+        img.src = f.previewUrl || '';
+
+        const a = document.createElement('a');
+        a.textContent = f.name;
+        a.href = f.photoUrl || '#';
+        a.target = '_blank';
+        a.rel = 'noreferrer';
+
+        wrap.appendChild(img);
+        wrap.appendChild(document.createElement('div')).appendChild(a);
+        gridEl.appendChild(wrap);
+      }
+    }
+
+    main().catch(err => {
+      document.getElementById('status').textContent = String(err);
+    });
+  </script>
+</body>
+</html>
