@@ -1,26 +1,5 @@
 import { imageSig } from '../utils/crypto.js';
-
-async function loadAlbumInfo(env, albumId) {
-  const infoKey = `albums/${albumId}/info.json`;
-  const infoObj = await env.BUCKET.get(infoKey);
-  if (!infoObj) return null;
-  try {
-    return await infoObj.json();
-  } catch {
-    return null;
-  }
-}
-
-function extractSecrets(info) {
-  const secrets = new Set();
-  if (info && typeof info.secret === "string" && info.secret) secrets.add(info.secret);
-  if (info && info.secrets && typeof info.secrets === "object") {
-    for (const k of Object.keys(info.secrets)) {
-      if (k) secrets.add(k);
-    }
-  }
-  return [...secrets];
-}
+import { getAlbumInfoWithSecrets } from '../utils/album.js';
 
 /**
  * Handle GET /img/<albumId>/(photos|preview)/<name>
@@ -35,15 +14,19 @@ export async function handleImageRequest(request, env, albumId, kind, name) {
   }
 
   // Validate signature against any secret in info.json (secrets set)
-  const info = await loadAlbumInfo(env, albumId);
-  const secrets = extractSecrets(info);
+  // (secrets list is cached in-memory inside getAlbumInfoWithSecrets)
+  const loaded = await getAlbumInfoWithSecrets(albumId, env);
+  if (!loaded.ok) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const secrets = loaded.secrets;
   if (!secrets.length) {
     return new Response("Forbidden", { status: 403 });
   }
 
   let ok = false;
   for (const secret of secrets) {
-    // Requested format: hash(albumId + name + secret) (we use a delimiter to avoid ambiguity)
     const expected = await imageSig(albumId, name, secret);
     if (expected === sig) {
       ok = true;
