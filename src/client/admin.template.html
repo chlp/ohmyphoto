@@ -215,6 +215,17 @@
         const tdSecrets = document.createElement('td');
         const secretsArea = document.createElement('textarea');
         secretsArea.placeholder = '';
+        // Prevent password managers / autofill extensions from trying to hook into this field.
+        // Some extensions inject buggy content scripts and can crash on focus.
+        secretsArea.setAttribute('autocomplete', 'off');
+        secretsArea.setAttribute('autocorrect', 'off');
+        secretsArea.setAttribute('autocapitalize', 'none');
+        secretsArea.setAttribute('spellcheck', 'false');
+        secretsArea.setAttribute('inputmode', 'text');
+        secretsArea.setAttribute('data-lpignore', 'true');   // LastPass
+        secretsArea.setAttribute('data-1p-ignore', 'true');  // 1Password
+        secretsArea.setAttribute('data-bwignore', 'true');   // Bitwarden
+        secretsArea.setAttribute('data-form-type', 'other'); // generic hint for some autofill engines
         // Prefill existing secrets (one per line)
         secretsArea.value = (a.secrets || []).join('\n');
         tdSecrets.appendChild(secretsArea);
