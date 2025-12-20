@@ -1,3 +1,47 @@
+/**
+ * Check secret for album using info.json
+ * @param {string} albumId
+ * @param {string} secret
+ * @param {Object} env - Environment с BUCKET
+ * @returns {Promise<{success: true, info: Object}|{success: false, response: Response}>}
+ */
+async function checkAlbumSecret(albumId, secret, env) {
+  const infoKey = `albums/${albumId}/info.json`;
+  const infoObj = await env.BUCKET.get(infoKey);
+  
+  if (!infoObj) {
+    return {
+      success: false,
+      response: new Response("Album not found", { status: 404 })
+    };
+  }
+  
+  let info;
+  try {
+    info = await infoObj.json();
+  } catch {
+    return {
+      success: false,
+      response: new Response("Bad info.json", { status: 500 })
+    };
+  }
+  
+  const expected = String(info?.secret || "");
+  const providedSecret = String(secret || "");
+  
+  if (!expected || providedSecret !== expected) {
+    return {
+      success: false,
+      response: new Response("Invalid secret", { status: 403 })
+    };
+  }
+  
+  return {
+    success: true,
+    info
+  };
+}
+
 export default {
     async fetch(request, env) {
       const url = new URL(request.url);
@@ -16,22 +60,12 @@ export default {
         }
         const secret = String(body?.secret || "");
   
-        // 1) Check if album exists (info.json)
-        const infoKey = `albums/${albumId}/info.json`;
-        const infoObj = await env.BUCKET.get(infoKey);
-        if (!infoObj) return new Response("Not found", { status: 404 });
-  
-        let info;
-        try {
-          info = await infoObj.json();
-        } catch {
-          return new Response("Bad info.json", { status: 500 });
+        // 1) Check if album exists and secret is valid
+        const checkResult = await checkAlbumSecret(albumId, secret, env);
+        if (!checkResult.success) {
+          return checkResult.response;
         }
-  
-        const expected = String(info?.secret || "");
-        if (!expected || secret !== expected) {
-          return new Response("Forbidden", { status: 403 });
-        }
+        const info = checkResult.info;
   
         // 2) LIST photos/
         const prefix = `albums/${albumId}/photos/`;
@@ -76,9 +110,7 @@ export default {
         const headers = new Headers();
         obj.writeHttpMetadata(headers);
         headers.set("ETag", obj.httpEtag);
-        headers.set("X-Robots-Tag", "noindex, nofollow");
-  
-        // minimally: cache for an hour for preview/photo (can be configured)
+        headers.set("X-Robots-Tag", "noindex, nofollow");  
         headers.set("Cache-Control", "public, max-age=3600");
   
         return new Response(obj.body, { headers });
