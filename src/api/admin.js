@@ -178,8 +178,9 @@ export async function handleAdminRequest(request, env) {
       const albumId = key.replace(/^albums\//, "").replace(/\/info\.json$/, "");
       const loaded = await getAlbumInfoWithSecrets(albumId, env);
       const title = loaded.ok ? String(loaded.info?.title || "OhMyPhoto") : "OhMyPhoto";
-      const secretCount = loaded.ok ? loaded.secrets.length : 0;
-      albums.push({ albumId, title, secretCount });
+      const secrets = loaded.ok ? loaded.secrets : [];
+      const secretCount = secrets.length;
+      albums.push({ albumId, title, secretCount, secrets });
     }
 
     albums.sort((a, b) => a.albumId.localeCompare(b.albumId));

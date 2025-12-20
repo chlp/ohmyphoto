@@ -214,9 +214,9 @@
 
         const tdSecrets = document.createElement('td');
         const secretsArea = document.createElement('textarea');
-        secretsArea.placeholder = 'secret1\\nsecret2';
-        // We only have counts here; user edits secrets explicitly.
-        secretsArea.value = '';
+        secretsArea.placeholder = '';
+        // Prefill existing secrets (one per line)
+        secretsArea.value = (a.secrets || []).join('\n');
         tdSecrets.appendChild(secretsArea);
         const hint = document.createElement('div');
         hint.className = 'muted small';
@@ -235,10 +235,9 @@
         saveBtn.className = 'primary';
         saveBtn.textContent = 'Save';
         saveBtn.onclick = async () => {
-          const secrets = parseSecrets(secretsArea.value);
           const payload = { title: titleInput.value || 'OhMyPhoto' };
-          // Only send secrets if user typed something (so we don't accidentally wipe)
-          if (secretsArea.value.trim()) payload.secrets = secrets;
+          // Always send secrets (allows clearing); textarea is prefilled from server.
+          payload.secrets = parseSecrets(secretsArea.value);
           if (renameInput.value.trim()) payload.newAlbumId = renameInput.value.trim();
           const r = await api(`/api/admin/album/${encodeURIComponent(a.albumId)}`, {
             method: 'PUT',
