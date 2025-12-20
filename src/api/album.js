@@ -58,7 +58,7 @@ export async function handleAlbumRequest(request, env, albumId) {
 
   const resp = {
     albumId,
-    title: String(info?.title || ""),
+    title: String(info?.title || "OhMyPhoto"),
     files: resolvedFiles
   };
 
