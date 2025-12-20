@@ -13,11 +13,8 @@
 
   <script>
     function getAlbumIdFromPath() {
-      // expect /a/<albumId>
+      // expect /<albumId>
       const parts = location.pathname.split('/').filter(Boolean);
-      const aIdx = parts.indexOf('a');
-      if (aIdx >= 0 && parts[aIdx + 1]) return parts[aIdx + 1];
-      // fallback: first segment
       return parts[0] || '';
     }
 
@@ -30,11 +27,11 @@
       const titleEl = document.getElementById('title');
 
       if (!albumId) {
-        statusEl.textContent = 'No albumId in URL. Expected /a/<albumId>#<secret>';
+        statusEl.textContent = 'No albumId in URL. Expected /<albumId>#<secret>';
         return;
       }
       if (!secret) {
-        statusEl.textContent = 'No secret in URL hash. Expected /a/<albumId>#<secret>';
+        statusEl.textContent = 'No secret in URL hash. Expected /<albumId>#<secret>';
         return;
       }
 
