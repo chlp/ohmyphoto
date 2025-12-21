@@ -21,6 +21,12 @@
     .primary { background: #175cd3; color: #fff; border: 0; padding: 8px 12px; border-radius: 6px; }
     .ghost { background: #fff; border: 1px solid #ccc; padding: 8px 12px; border-radius: 6px; }
     code { background: #f6f6f6; padding: 2px 4px; border-radius: 4px; }
+    .hidden { display: none; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    .thumb { width: 100%; height: 160px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; background: #fafafa; }
+    .fileCard { border: 1px solid #eee; border-radius: 10px; padding: 12px; }
+    .fileActions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
 </head>
 <body>
@@ -51,7 +57,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="albumsCard">
     <div class="row" style="justify-content: space-between;">
       <h2 style="margin:0">Albums</h2>
       <button class="ghost" id="refreshBtn">Refresh</button>
@@ -65,6 +71,7 @@
             <th>title</th>
             <th>secrets (one per line)</th>
             <th>rename</th>
+            <th>photos</th>
             <th>actions</th>
           </tr>
         </thead>
@@ -73,14 +80,53 @@
     </div>
   </div>
 
+  <div class="card hidden" id="editorCard">
+    <div class="row" style="justify-content: space-between;">
+      <div>
+        <h2 style="margin:0">Edit album: <code id="editAlbumId" class="mono"></code></h2>
+        <div class="muted small" id="filesStatus"></div>
+      </div>
+      <div class="row">
+        <button class="ghost" id="backToAlbumsBtn">Back</button>
+        <button class="ghost" id="refreshFilesBtn">Refresh files</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <h3 style="margin-top:0;">Upload photos</h3>
+      <div class="row">
+        <input id="uploadInput" type="file" accept="image/*" multiple />
+        <label class="row" style="gap:6px;">
+          <input id="overwriteUpload" type="checkbox" />
+          overwrite existing
+        </label>
+        <button class="primary" id="uploadBtn">Upload selected</button>
+      </div>
+      <div class="muted small" id="uploadStatus"></div>
+    </div>
+
+    <h3>Files</h3>
+    <div id="filesGrid" class="grid"></div>
+  </div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     const tokenEl = $('token');
     const statusEl = $('status');
     const authInfoEl = $('authInfo');
+    const albumsCardEl = $('albumsCard');
+    const editorCardEl = $('editorCard');
+    const editAlbumIdEl = $('editAlbumId');
+    const filesStatusEl = $('filesStatus');
+    const filesGridEl = $('filesGrid');
+    const uploadInputEl = $('uploadInput');
+    const uploadStatusEl = $('uploadStatus');
 
     // Cloudflare Turnstile site key (injected by build step)
     const TURNSTILE_SITE_KEY = '__TURNSTILE_SITE_KEY__';
+
+    let currentEditAlbumId = '';
+    let currentEditSecret = '';
 
     function base64UrlDecodeToJson(b64url) {
       try {
@@ -245,6 +291,215 @@
         .filter(Boolean);
     }
 
+    function showEditor(albumId, secret) {
+      currentEditAlbumId = String(albumId || '');
+      currentEditSecret = String(secret || '');
+      editAlbumIdEl.textContent = currentEditAlbumId;
+      albumsCardEl.classList.add('hidden');
+      editorCardEl.classList.remove('hidden');
+      filesGridEl.innerHTML = '';
+      filesStatusEl.textContent = '';
+      uploadStatusEl.textContent = '';
+      uploadInputEl.value = '';
+    }
+
+    function hideEditor() {
+      currentEditAlbumId = '';
+      currentEditSecret = '';
+      editorCardEl.classList.add('hidden');
+      albumsCardEl.classList.remove('hidden');
+    }
+
+    async function sha256Hex(input) {
+      const data = new TextEncoder().encode(String(input));
+      const hash = await crypto.subtle.digest("SHA-256", data);
+      const bytes = new Uint8Array(hash);
+      let hex = "";
+      for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+      return hex;
+    }
+
+    async function imageSig(albumId, name, secret) {
+      return sha256Hex(`${albumId}:${name}:${secret}`);
+    }
+
+    function normalizeUploadName(filename) {
+      const raw = String(filename || '').replace(/^.*[\\/]/, '');
+      const base = raw.replace(/\.[^.]+$/, '');
+      let s = base;
+      try { s = s.normalize('NFKD'); } catch {}
+      s = s.replace(/[^\w.-]+/g, '-'); // keep ascii-ish
+      s = s.replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+      s = (s || 'photo').slice(0, 80);
+      return `${s}.jpg`;
+    }
+
+    async function toJpegBlob(file, maxDim) {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale));
+      const h = Math.max(1, Math.round(bmp.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      ctx.drawImage(bmp, 0, 0, w, h);
+      try { bmp.close && bmp.close(); } catch {}
+      return await new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (!blob) return reject(new Error('JPEG encode failed'));
+          resolve(blob);
+        }, 'image/jpeg', 0.9);
+      });
+    }
+
+    async function refreshFiles() {
+      if (!currentEditAlbumId) return;
+      if (!currentEditSecret) {
+        filesStatusEl.textContent = 'Error: album has no secrets. Add at least one secret and Save.';
+        return;
+      }
+      filesStatusEl.textContent = 'Loading files...';
+      filesGridEl.innerHTML = '';
+      const resp = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, { method: 'GET' });
+      if (!resp.ok) {
+        filesStatusEl.textContent = `Error: ${resp.status}`;
+        return;
+      }
+      const data = await resp.json();
+      const files = data.files || [];
+      filesStatusEl.textContent = `Files: ${files.length}`;
+
+      for (const f of files) {
+        const card = document.createElement('div');
+        card.className = 'fileCard';
+
+        const sig = await imageSig(currentEditAlbumId, f.name, currentEditSecret);
+        const qs = `?s=${sig}`;
+        const previewSignedUrl = `/img/${encodeURIComponent(currentEditAlbumId)}/preview/${encodeURIComponent(f.name)}${qs}`;
+        const photoSignedUrl = `/img/${encodeURIComponent(currentEditAlbumId)}/photos/${encodeURIComponent(f.name)}${qs}`;
+
+        const imgLink = document.createElement('a');
+        imgLink.href = photoSignedUrl;
+        imgLink.title = 'Open full-size';
+        imgLink.target = '_blank';
+        imgLink.rel = 'noreferrer';
+
+        const img = document.createElement('img');
+        img.className = 'thumb';
+        img.loading = 'lazy';
+        img.alt = f.name;
+        img.src = previewSignedUrl;
+        imgLink.appendChild(img);
+        card.appendChild(imgLink);
+
+        const nameRow = document.createElement('div');
+        nameRow.className = 'row';
+        nameRow.style.marginTop = '10px';
+
+        const nameInput = document.createElement('input');
+        nameInput.value = f.name;
+        nameInput.style.flex = '1';
+        nameInput.className = 'mono';
+        nameRow.appendChild(nameInput);
+        card.appendChild(nameRow);
+
+        const actions = document.createElement('div');
+        actions.className = 'fileActions';
+        actions.style.marginTop = '8px';
+
+        const renameBtn = document.createElement('button');
+        renameBtn.className = 'ghost';
+        renameBtn.textContent = 'Rename';
+        renameBtn.onclick = async () => {
+          const newName = nameInput.value.trim();
+          if (!newName) return alert('new name required');
+          const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/file/${encodeURIComponent(f.name)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName })
+          });
+          if (!r.ok) {
+            const t = await r.text();
+            alert(`Rename failed: ${r.status} ${t}`);
+            return;
+          }
+          await refreshFiles();
+        };
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'danger';
+        delBtn.textContent = 'Delete';
+        delBtn.onclick = async () => {
+          if (!confirm(`Delete "${f.name}"?`)) return;
+          const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/file/${encodeURIComponent(f.name)}`, {
+            method: 'DELETE'
+          });
+          if (!r.ok) {
+            const t = await r.text();
+            alert(`Delete failed: ${r.status} ${t}`);
+            return;
+          }
+          await refreshFiles();
+        };
+
+        actions.appendChild(renameBtn);
+        actions.appendChild(delBtn);
+        card.appendChild(actions);
+
+        const note = document.createElement('div');
+        note.className = 'muted small';
+        note.textContent = f.hasPreview ? '' : 'preview missing';
+        card.appendChild(note);
+
+        filesGridEl.appendChild(card);
+      }
+    }
+
+    async function uploadSelected() {
+      if (!currentEditAlbumId) return;
+      const list = Array.from(uploadInputEl.files || []);
+      if (!list.length) return alert('Select files first');
+      const overwrite = $('overwriteUpload').checked;
+      uploadStatusEl.textContent = `Processing ${list.length} file(s)...`;
+
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        const outName = normalizeUploadName(file.name);
+        uploadStatusEl.textContent = `(${i + 1}/${list.length}) Converting ${file.name} -> ${outName} ...`;
+        let photoBlob, previewBlob;
+        try {
+          photoBlob = await toJpegBlob(file, 3000);
+          previewBlob = await toJpegBlob(file, 1000);
+        } catch (e) {
+          console.error(e);
+          uploadStatusEl.textContent = `Failed to process ${file.name}: ${String(e)}`;
+          return;
+        }
+
+        const fd = new FormData();
+        fd.append('name', outName);
+        fd.append('overwrite', overwrite ? '1' : '0');
+        fd.append('photo', new File([photoBlob], outName, { type: 'image/jpeg' }));
+        fd.append('preview', new File([previewBlob], outName, { type: 'image/jpeg' }));
+
+        uploadStatusEl.textContent = `(${i + 1}/${list.length}) Uploading ${outName} ...`;
+        const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/file`, {
+          method: 'POST',
+          body: fd
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          uploadStatusEl.textContent = `Upload failed (${outName}): ${r.status} ${t}`;
+          return;
+        }
+      }
+
+      uploadStatusEl.textContent = 'Upload complete.';
+      uploadInputEl.value = '';
+      await refreshFiles();
+    }
+
     async function refresh() {
       statusEl.textContent = 'Loading...';
       const resp = await api('/api/admin/albums', { method: 'GET' });
@@ -305,6 +560,22 @@
         tdRename.appendChild(renameInput);
         tr.appendChild(tdRename);
 
+        const tdPhotos = document.createElement('td');
+        const editBtn = document.createElement('button');
+        editBtn.className = 'ghost';
+        editBtn.textContent = 'Edit';
+        editBtn.onclick = async () => {
+          const secret = (a.secrets || [])[0] || '';
+          if (!secret) {
+            alert('Album has no secrets. Add at least one secret and Save first.');
+            return;
+          }
+          showEditor(a.albumId, secret);
+          await refreshFiles();
+        };
+        tdPhotos.appendChild(editBtn);
+        tr.appendChild(tdPhotos);
+
         const tdActions = document.createElement('td');
         const saveBtn = document.createElement('button');
         saveBtn.className = 'primary';
@@ -350,6 +621,9 @@
     }
 
     $('refreshBtn').onclick = refresh;
+    $('backToAlbumsBtn').onclick = () => hideEditor();
+    $('refreshFilesBtn').onclick = () => refreshFiles().catch(() => {});
+    $('uploadBtn').onclick = () => uploadSelected().catch(() => {});
 
     $('createBtn').onclick = async () => {
       const albumId = $('newAlbumId').value.trim();

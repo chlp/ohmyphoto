@@ -51,6 +51,46 @@ function isValidAlbumId(albumId) {
   return /^[a-zA-Z0-9_-]{1,64}$/.test(albumId);
 }
 
+function randomHex(bytesLen) {
+  const bytes = new Uint8Array(bytesLen);
+  crypto.getRandomValues(bytes);
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex;
+}
+
+function generateAlbumSecret32() {
+  // 16 bytes => 32 hex chars
+  return randomHex(16);
+}
+
+function normalizeJpgName(input) {
+  let name = String(input || "").trim();
+  if (!name) return "";
+  // Drop any path components (defense-in-depth)
+  name = name.replace(/^.*[\\/]/, "");
+  // Ensure .jpg extension
+  if (!/\.jpe?g$/i.test(name)) {
+    name = name.replace(/\.[^.]+$/, ""); // strip one extension if present
+    name = `${name}.jpg`;
+  } else {
+    name = name.replace(/\.jpeg$/i, ".jpg");
+  }
+  return name;
+}
+
+function isValidPhotoFileName(name) {
+  const n = String(name || "").trim();
+  if (!n) return false;
+  if (n.length > 160) return false;
+  if (n.includes("/") || n.includes("\\") || n.includes("\0")) return false;
+  if (n.startsWith(".")) return false;
+  // predictable + URL-safe-ish (space allowed for convenience)
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._ -]*$/.test(n)) return false;
+  if (!/\.jpg$/i.test(n)) return false;
+  return true;
+}
+
 async function readJson(request) {
   try {
     return await request.json();
@@ -113,6 +153,47 @@ async function copyObject(env, fromKey, toKey) {
   if (obj.customMetadata) opts.customMetadata = obj.customMetadata;
 
   await env.BUCKET.put(toKey, obj.body, opts);
+}
+
+async function getAlbumExists(env, albumId) {
+  const existing = await env.BUCKET.get(`albums/${albumId}/info.json`);
+  return !!existing;
+}
+
+async function listAlbumPhotoNames(env, albumId) {
+  const photosPrefix = `albums/${albumId}/photos/`;
+  const previewPrefix = `albums/${albumId}/preview/`;
+  const [photoKeys, previewKeys] = await Promise.all([
+    listAllKeys(env, photosPrefix),
+    listAllKeys(env, previewPrefix)
+  ]);
+
+  const photoNames = photoKeys
+    .filter((k) => k !== photosPrefix)
+    .map((k) => k.substring(photosPrefix.length))
+    .sort((a, b) => a.localeCompare(b));
+
+  const previewSet = new Set(
+    previewKeys
+      .filter((k) => k !== previewPrefix)
+      .map((k) => k.substring(previewPrefix.length))
+  );
+
+  return photoNames.map((name) => ({
+    name,
+    hasPreview: previewSet.has(name),
+    photoUrl: `/api/admin/album/${encodeURIComponent(albumId)}/raw/photos/${encodeURIComponent(name)}`,
+    previewUrl: `/api/admin/album/${encodeURIComponent(albumId)}/raw/preview/${encodeURIComponent(name)}`
+  }));
+}
+
+async function putJpeg(env, key, file) {
+  const buf = await file.arrayBuffer();
+  await env.BUCKET.put(key, buf, {
+    httpMetadata: {
+      contentType: "image/jpeg"
+    }
+  });
 }
 
 async function renameAlbum(env, oldAlbumId, newAlbumId) {
@@ -188,6 +269,129 @@ export async function handleAdminRequest(request, env) {
   const authErr = await authorizeAdmin(request, env);
   if (authErr) return authErr;
 
+  // GET /api/admin/album/<albumId>/files
+  const mFiles = path.match(/^\/api\/admin\/album\/([^/]+)\/files$/);
+  if (mFiles && request.method === "GET") {
+    const albumId = decodeURIComponent(mFiles[1]);
+    if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+    const exists = await getAlbumExists(env, albumId);
+    if (!exists) return new Response("Not found", { status: 404 });
+    const files = await listAlbumPhotoNames(env, albumId);
+    return ok({ albumId, files });
+  }
+
+  // GET /api/admin/album/<albumId>/raw/(photos|preview)/<name>
+  const mRaw = path.match(/^\/api\/admin\/album\/([^/]+)\/raw\/(photos|preview)\/(.+)$/);
+  if (mRaw && request.method === "GET") {
+    const albumId = decodeURIComponent(mRaw[1]);
+    const kind = mRaw[2];
+    const name = decodeURIComponent(mRaw[3]);
+    if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+    const normalized = normalizeJpgName(name);
+    if (!isValidPhotoFileName(normalized)) return badRequest("Invalid file name");
+
+    const key = `albums/${albumId}/${kind}/${normalized}`;
+    const obj = await env.BUCKET.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+
+    const headers = new Headers();
+    obj.writeHttpMetadata(headers);
+    headers.set("ETag", obj.httpEtag);
+    headers.set("Cache-Control", "no-store");
+    headers.set("X-Robots-Tag", "noindex, nofollow");
+    return new Response(obj.body, { headers });
+  }
+
+  // POST /api/admin/album/<albumId>/file (upload one photo+preview, both JPEG)
+  const mUpload = path.match(/^\/api\/admin\/album\/([^/]+)\/file$/);
+  if (mUpload && request.method === "POST") {
+    const albumId = decodeURIComponent(mUpload[1]);
+    if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+    const exists = await getAlbumExists(env, albumId);
+    if (!exists) return new Response("Not found", { status: 404 });
+
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return badRequest("Expected multipart/form-data");
+    }
+
+    const photo = form.get("photo");
+    const preview = form.get("preview");
+    const overwriteRaw = String(form.get("overwrite") || "").toLowerCase();
+    const overwrite = overwriteRaw === "1" || overwriteRaw === "true" || overwriteRaw === "yes";
+
+    if (!(photo instanceof File)) return badRequest("Missing photo file");
+    if (!(preview instanceof File)) return badRequest("Missing preview file");
+
+    const nameRaw = form.get("name") != null ? String(form.get("name") || "") : String(photo.name || "");
+    const name = normalizeJpgName(nameRaw);
+    if (!isValidPhotoFileName(name)) return badRequest("Invalid file name");
+
+    const photoKey = `albums/${albumId}/photos/${name}`;
+    const previewKey = `albums/${albumId}/preview/${name}`;
+
+    if (!overwrite) {
+      const [p0, p1] = await Promise.all([env.BUCKET.get(photoKey), env.BUCKET.get(previewKey)]);
+      if (p0 || p1) return conflict("File already exists (set overwrite=1 to replace)");
+    }
+
+    await Promise.all([
+      putJpeg(env, photoKey, photo),
+      putJpeg(env, previewKey, preview)
+    ]);
+
+    return ok({ uploaded: true, albumId, name });
+  }
+
+  // PUT/DELETE /api/admin/album/<albumId>/file/<name>
+  const mFile = path.match(/^\/api\/admin\/album\/([^/]+)\/file\/(.+)$/);
+  if (mFile && (request.method === "DELETE" || request.method === "PUT")) {
+    const albumId = decodeURIComponent(mFile[1]);
+    const nameInPath = decodeURIComponent(mFile[2]);
+    if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+    const exists = await getAlbumExists(env, albumId);
+    if (!exists) return new Response("Not found", { status: 404 });
+
+    const name = normalizeJpgName(nameInPath);
+    if (!isValidPhotoFileName(name)) return badRequest("Invalid file name");
+
+    const photoKey = `albums/${albumId}/photos/${name}`;
+    const previewKey = `albums/${albumId}/preview/${name}`;
+
+    if (request.method === "DELETE") {
+      const [p0, p1] = await Promise.all([env.BUCKET.get(photoKey), env.BUCKET.get(previewKey)]);
+      if (!p0 && !p1) return new Response("Not found", { status: 404 });
+      await env.BUCKET.delete([photoKey, previewKey]);
+      return ok({ deleted: true, albumId, name });
+    }
+
+    const body = await readJson(request);
+    if (!body) return badRequest("Bad JSON");
+    const newNameRaw = String(body.newName || body.newFilename || "");
+    const newName = normalizeJpgName(newNameRaw);
+    if (!isValidPhotoFileName(newName)) return badRequest("Invalid newName");
+    if (newName === name) return ok({ renamed: true, albumId, from: name, to: newName });
+
+    const newPhotoKey = `albums/${albumId}/photos/${newName}`;
+    const newPreviewKey = `albums/${albumId}/preview/${newName}`;
+
+    const [oldPhoto, oldPreview] = await Promise.all([env.BUCKET.get(photoKey), env.BUCKET.get(previewKey)]);
+    if (!oldPhoto && !oldPreview) return new Response("Not found", { status: 404 });
+
+    const [dstPhoto, dstPreview] = await Promise.all([env.BUCKET.get(newPhotoKey), env.BUCKET.get(newPreviewKey)]);
+    if (dstPhoto || dstPreview) return conflict("Destination name already exists");
+
+    await Promise.all([
+      oldPhoto ? copyObject(env, photoKey, newPhotoKey) : Promise.resolve(),
+      oldPreview ? copyObject(env, previewKey, newPreviewKey) : Promise.resolve()
+    ]);
+
+    await env.BUCKET.delete([photoKey, previewKey]);
+    return ok({ renamed: true, albumId, from: name, to: newName });
+  }
+
   // GET /api/admin/albums
   if (path === "/api/admin/albums" && request.method === "GET") {
     const infoKeys = await listAlbumInfoKeys(env);
@@ -218,12 +422,14 @@ export async function handleAdminRequest(request, env) {
     const existing = await env.BUCKET.get(`albums/${albumId}/info.json`);
     if (existing) return conflict("Album already exists");
 
-    const info = { title, secrets: {} };
+    const secret = generateAlbumSecret32();
+    const info = { title, secrets: { [secret]: {} } };
     await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify(info, null, 2), {
       httpMetadata: { contentType: "application/json; charset=utf-8" }
     });
     invalidateAlbumCache(albumId);
-    return ok({ albumId, title });
+    // Return secret as a convenience for the UI/caller (still admin-protected).
+    return ok({ albumId, title, secret });
   }
 
   // PUT /api/admin/album/<albumId> (update + optional rename)
