@@ -125,7 +125,11 @@
       const data = await resp.json();
       const albumTitle = data.title || 'OhMyPhoto';
       titleEl.textContent = albumTitle;
-      document.title = albumTitle;
+      if (albumTitle !== 'OhMyPhoto') {
+        document.title = `${albumTitle} | OhMyPhoto`;
+      } else {
+        document.title = 'OhMyPhoto';
+      }
       statusEl.textContent = `Files: ${data.files.length}`;
 
       // Render previews if worker returns previewUrl
