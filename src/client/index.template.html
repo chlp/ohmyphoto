@@ -131,6 +131,8 @@
 
       if (data.files.length === 0) {
         statusEl.textContent = 'This is the correct link, but the photos haven’t been uploaded here yet.';
+      } else {
+        statusEl.textContent = '';
       }
 
       // Render previews if worker returns previewUrl
