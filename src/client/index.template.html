@@ -123,14 +123,15 @@
       }
 
       const data = await resp.json();
-      const albumTitle = data.title || 'OhMyPhoto';
+      const baseTitle = 'OhMyPhoto';
+      const albumTitle = data.title || baseTitle;
+
       titleEl.textContent = albumTitle;
-      if (albumTitle !== 'OhMyPhoto') {
-        document.title = `${albumTitle} | OhMyPhoto`;
-      } else {
-        document.title = 'OhMyPhoto';
+      document.title = albumTitle === baseTitle ? baseTitle : `${albumTitle} | ${baseTitle}`;
+
+      if (data.files.length === 0) {
+        statusEl.textContent = 'This is the correct link, but the photos haven’t been uploaded here yet.';
       }
-      statusEl.textContent = `Files: ${data.files.length}`;
 
       // Render previews if worker returns previewUrl
       gridEl.innerHTML = '';
