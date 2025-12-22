@@ -95,12 +95,7 @@
                   }
                 },
                 size: 'invisible',
-                execution: 'execute'
               });
-
-              // Execute the challenge once (reset first to avoid "already executing" warnings)
-              try { turnstile.reset(widgetId); } catch {}
-              try { turnstile.execute(widgetId); } catch { resolve(''); }
             });
           }
           log('turnstile token len=', String(turnstileToken || '').length, 'ms=', Math.round(performance.now() - t0));
