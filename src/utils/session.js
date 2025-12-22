@@ -28,6 +28,8 @@ function safeJsonParse(str) {
   }
 }
 
+import { sha256Hex } from "./crypto.js";
+
 async function hmacSha256Bytes(keyString, messageString) {
   const keyData = new TextEncoder().encode(String(keyString));
   const msgData = new TextEncoder().encode(String(messageString));
@@ -86,6 +88,52 @@ export async function verifyAdminSessionToken(sessionToken, adminToken, nowMs = 
   if (payload.v !== 1) return { ok: false };
   if (typeof payload.iat !== "number" || typeof payload.exp !== "number") return { ok: false };
   if (payload.exp <= nowMs) return { ok: false };
+
+  return { ok: true, payload };
+}
+
+/**
+ * Issue a short-lived "human verified" token (HMAC-SHA256), meant to be stored in a cookie.
+ * Token format: base64url(payloadJson) + "." + base64url(hmac(payload))
+ *
+ * Payload includes a short hash of the User-Agent to reduce cookie re-use across different clients.
+ */
+export async function issueHumanBypassToken(secretKey, userAgent, ttlMs = 30 * 60 * 1000, nowMs = Date.now()) {
+  const iat = nowMs;
+  const exp = nowMs + Math.max(5_000, Number(ttlMs) || 0);
+  const uaHash = String(await sha256Hex(String(userAgent || ""))).slice(0, 16);
+  const payload = { v: 1, iat, exp, u: uaHash };
+  const payloadB64 = base64UrlEncodeJson(payload);
+  const sigBytes = await hmacSha256Bytes(secretKey, payloadB64);
+  const sigB64 = base64UrlEncode(sigBytes);
+  return { token: `${payloadB64}.${sigB64}`, payload };
+}
+
+/**
+ * Verify "human verified" token.
+ * @returns {{ok:true,payload:any}|{ok:false}}
+ */
+export async function verifyHumanBypassToken(token, secretKey, userAgent, nowMs = Date.now()) {
+  const t = String(token || "");
+  const parts = t.split(".");
+  if (parts.length !== 2) return { ok: false };
+  const [payloadB64, sigB64] = parts;
+  if (!payloadB64 || !sigB64) return { ok: false };
+
+  const expectedSigBytes = await hmacSha256Bytes(secretKey, payloadB64);
+  const expectedSigB64 = base64UrlEncode(expectedSigBytes);
+  if (!timingSafeEqual(expectedSigB64, sigB64)) return { ok: false };
+
+  const payloadBytes = base64UrlDecodeToBytes(payloadB64);
+  const payloadStr = new TextDecoder().decode(payloadBytes);
+  const payload = safeJsonParse(payloadStr);
+  if (!payload || typeof payload !== "object") return { ok: false };
+  if (payload.v !== 1) return { ok: false };
+  if (typeof payload.iat !== "number" || typeof payload.exp !== "number") return { ok: false };
+  if (payload.exp <= nowMs) return { ok: false };
+
+  const uaHash = String(await sha256Hex(String(userAgent || ""))).slice(0, 16);
+  if (typeof payload.u !== "string" || payload.u !== uaHash) return { ok: false };
 
   return { ok: true, payload };
 }

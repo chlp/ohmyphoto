@@ -52,9 +52,37 @@
 
       setStatus('Loading...');
 
-      // Get Turnstile token if site key is configured
-      let turnstileToken = '';
-      if (TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY !== 'YOUR_TURNSTILE_SITE_KEY') {
+      async function fetchAlbumOnce(turnstileToken) {
+        setStatus('Fetching album...');
+        const controller = new AbortController();
+        const timeoutMs = 15000;
+        const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
+        try {
+          const tApi = performance.now();
+          const resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(debug ? { 'X-OhMyPhoto-Debug': '1' } : {})
+            },
+            body: JSON.stringify({ secret, turnstileToken: String(turnstileToken || '') }),
+            signal: controller.signal
+          });
+          log('album api status=', resp.status, 'ms=', Math.round(performance.now() - tApi));
+          if (debug) {
+            const rid = resp.headers.get('X-Request-Id');
+            const st = resp.headers.get('Server-Timing');
+            if (rid) log('request-id=', rid);
+            if (st) log('server-timing=', st);
+          }
+          return resp;
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      async function getTurnstileTokenOnce() {
+        if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY === 'YOUR_TURNSTILE_SITE_KEY') return '';
         try {
           setStatus('Verifying...');
           const t0 = performance.now();
@@ -69,75 +97,55 @@
             tick();
           });
 
-          if (typeof turnstile !== 'undefined') {
-            turnstileToken = await new Promise((resolve) => {
-              let resolved = false;
-              const timeout = setTimeout(() => {
+          if (typeof turnstile === 'undefined') return '';
+
+          const token = await new Promise((resolve) => {
+            let resolved = false;
+            const timeout = setTimeout(() => {
+              if (!resolved) {
+                resolved = true;
+                resolve(''); // Timeout - continue without token
+              }
+            }, 5000);
+
+            const widgetId = turnstile.render('#turnstile-widget', {
+              sitekey: TURNSTILE_SITE_KEY,
+              callback: (t) => {
                 if (!resolved) {
                   resolved = true;
-                  resolve(''); // Timeout - continue without token
+                  clearTimeout(timeout);
+                  resolve(t);
                 }
-              }, 5000);
-
-              const widgetId = turnstile.render('#turnstile-widget', {
-                sitekey: TURNSTILE_SITE_KEY,
-                callback: (token) => {
-                  if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    resolve(token);
-                  }
-                },
-                'error-callback': () => {
-                  if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    resolve(''); // Continue without token on error
-                  }
-                },
-                // For invisible widgets, Turnstile will not run unless we call execute().
-                size: 'invisible',
-                execution: 'execute',
-                appearance: 'interaction-only',
-              });
-
-              // IMPORTANT: for size=invisible + execution=execute, we must execute explicitly.
-              try { turnstile.reset(widgetId); } catch {}
-              try { turnstile.execute(widgetId); } catch { resolve(''); }
+              },
+              'error-callback': () => {
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  resolve('');
+                }
+              },
+              size: 'invisible',
+              execution: 'execute',
+              appearance: 'interaction-only',
             });
-          }
-          log('turnstile token len=', String(turnstileToken || '').length, 'ms=', Math.round(performance.now() - t0));
+
+            try { turnstile.reset(widgetId); } catch {}
+            try { turnstile.execute(widgetId); } catch { resolve(''); }
+          });
+
+          log('turnstile token len=', String(token || '').length, 'ms=', Math.round(performance.now() - t0));
+          return token || '';
         } catch (err) {
           console.warn('Turnstile verification failed:', err);
-          // Continue without token if Turnstile fails
+          return '';
         }
       }
 
-      setStatus('Fetching album...');
-      const controller = new AbortController();
-      const timeoutMs = 15000;
-      const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
-      let resp;
-      try {
-        const tApi = performance.now();
-        resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(debug ? { 'X-OhMyPhoto-Debug': '1' } : {})
-          },
-          body: JSON.stringify({ secret, turnstileToken }),
-          signal: controller.signal
-        });
-        log('album api status=', resp.status, 'ms=', Math.round(performance.now() - tApi));
-        if (debug) {
-          const rid = resp.headers.get('X-Request-Id');
-          const st = resp.headers.get('Server-Timing');
-          if (rid) log('request-id=', rid);
-          if (st) log('server-timing=', st);
-        }
-      } finally {
-        clearTimeout(timeout);
+      // Fast path: try without Turnstile. If server requires it, we'll get 403 and retry once.
+      let resp = await fetchAlbumOnce('');
+      if (resp.status === 403) {
+        const token = await getTurnstileTokenOnce();
+        resp = await fetchAlbumOnce(token);
       }
 
       if (resp.status === 404) {
