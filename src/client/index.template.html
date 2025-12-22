@@ -13,8 +13,10 @@
 <body>
   <h1 id="title">OhMyPhoto</h1>
   <div id="status"></div>
-  <!-- Turnstile widget container (kept small; can become interactive if needed) -->
-  <div id="turnstile-widget" style="margin:12px 0;min-height:72px;"></div>
+  <!-- Turnstile widget container: collapsed by default; expands only if verification is needed -->
+  <div id="turnstile-wrap" style="height:0;overflow:hidden;">
+    <div id="turnstile-widget" style="margin:12px 0;min-height:72px;"></div>
+  </div>
   <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
 
   <script>
@@ -98,6 +100,10 @@
           });
 
           if (typeof turnstile === 'undefined') return '';
+
+          // Expand container only when verification is actually needed.
+          const wrap = document.getElementById('turnstile-wrap');
+          if (wrap) wrap.style.height = '96px';
 
           const token = await new Promise((resolve) => {
             let resolved = false;
