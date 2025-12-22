@@ -35,24 +35,11 @@ function makeSetCookie({ name, value, maxAgeSec, secure }) {
  * Handle POST /api/album/<albumId>
  */
 export async function handleAlbumRequest(request, env, albumId) {
-  const debug = request.headers.get('X-OhMyPhoto-Debug') === '1';
-  const reqId = (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
-  const timings = [];
-  const mark = (name, startedAtMs) => timings.push([name, Date.now() - startedAtMs]);
-  const debugHeaders = () => {
-    if (!debug) return {};
-    const serverTiming = timings.map(([n, d]) => `${n};dur=${Math.max(0, Number(d) || 0)}`).join(', ');
-    return {
-      'X-Request-Id': reqId,
-      ...(serverTiming ? { 'Server-Timing': serverTiming } : {})
-    };
-  };
-
   let body;
   try {
     body = await request.json();
   } catch {
-    return new Response("Bad JSON", { status: 400, headers: debugHeaders() });
+    return new Response("Bad JSON", { status: 400 });
   }
   const secret = String(body?.secret || "");
   const turnstileToken = String(body?.turnstileToken || "");
@@ -71,9 +58,7 @@ export async function handleAlbumRequest(request, env, albumId) {
     if (cookieEnabled) {
       const cookieToken = getCookieValue(request.headers.get("Cookie"), cookieName);
       if (cookieToken) {
-        const tVerify = Date.now();
         const ok = await verifyHumanBypassToken(cookieToken, env.TURNSTILE_SECRET_KEY, ua);
-        mark('turnstile_cookie', tVerify);
         if (ok.ok) {
           // Sliding TTL: refresh cookie.
           const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, ua, ttlMs);
@@ -90,10 +75,9 @@ export async function handleAlbumRequest(request, env, albumId) {
 
     if (!setBypassCookie) {
       if (!turnstileToken) {
-        return new Response("Bot verification required", { status: 403, headers: debugHeaders() });
+        return new Response("Bot verification required", { status: 403 });
       }
       const clientIP = request.headers.get('CF-Connecting-IP') || null;
-      const tTurnstile = Date.now();
       const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
       const turnstileResult = await verifyTurnstileToken(
         turnstileToken,
@@ -101,9 +85,8 @@ export async function handleAlbumRequest(request, env, albumId) {
         clientIP,
         turnstileTimeoutMs
       );
-      mark('turnstile', tTurnstile);
       if (!turnstileResult.success) {
-        return new Response("Bot verification failed", { status: 403, headers: debugHeaders() });
+        return new Response("Bot verification failed", { status: 403 });
       }
 
       if (cookieEnabled) {
@@ -120,22 +103,14 @@ export async function handleAlbumRequest(request, env, albumId) {
   }
 
   // Check if album exists and secret is valid
-  const tSecret = Date.now();
   const checkResult = await checkAlbumSecret(albumId, secret, env);
-  mark('check_secret', tSecret);
   if (!checkResult.success) {
-    if (!debug) return checkResult.response;
-    const r = checkResult.response;
-    const headers = new Headers(r.headers);
-    const dh = debugHeaders();
-    for (const [k, v] of Object.entries(dh)) headers.set(k, v);
-    return new Response(r.body, { status: r.status, statusText: r.statusText, headers });
+    return checkResult.response;
   }
   const info = checkResult.info;
   const matchedSecret = checkResult.matchedSecret;
 
   // LIST photos/ (cached via Durable Object when available)
-  const tList = Date.now();
   const idx = await getAlbumIndex(env, albumId);
   let names = null;
   if (idx && idx.ok) {
@@ -150,7 +125,6 @@ export async function handleAlbumRequest(request, env, albumId) {
       .filter(k => k !== prefix)
       .map(k => k.substring(prefix.length));
   }
-  mark('r2_list', tList);
 
   const files = names.map(async (name) => {
     const sig = await imageSig(albumId, name, matchedSecret);
@@ -162,9 +136,7 @@ export async function handleAlbumRequest(request, env, albumId) {
     };
   });
 
-  const tSig = Date.now();
   const resolvedFiles = await Promise.all(files);
-  mark('sign_urls', tSig);
 
   const resp = {
     albumId,
@@ -176,7 +148,6 @@ export async function handleAlbumRequest(request, env, albumId) {
     "Cache-Control": "no-store",
     "X-Robots-Tag": "noindex, nofollow",
     "Referrer-Policy": "no-referrer",
-    ...debugHeaders()
   };
   if (setBypassCookie && bypassCookieHeader) {
     extra["Set-Cookie"] = bypassCookieHeader;

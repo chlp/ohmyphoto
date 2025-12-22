@@ -39,16 +39,12 @@
     async function main() {
       const albumId = getAlbumIdFromPath();
       const secret = (location.hash || '').replace(/^#/, '');
-      const debug = new URL(location.href).searchParams.get('debug') === '1';
 
       const statusEl = document.getElementById('status');
       const gridEl = document.getElementById('grid');
       const titleEl = document.getElementById('title');
 
-      const startedAt = performance.now();
-      const log = (...args) => { if (debug) console.log('[ohmyphoto]', ...args); };
-      const setStatus = (s) => { statusEl.textContent = s; log('status:', s); };
-      const ms = () => Math.round(performance.now() - startedAt);
+      const setStatus = (s) => { statusEl.textContent = s; };
 
       if (!albumId) {
         setStatus('No albumId in URL. Expected /<albumId>#<secret>');
@@ -72,18 +68,10 @@
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...(debug ? { 'X-OhMyPhoto-Debug': '1' } : {})
             },
             body: JSON.stringify({ secret, turnstileToken: String(turnstileToken || '') }),
             signal: controller.signal
           });
-          log('album api status=', resp.status, 'ms=', Math.round(performance.now() - tApi));
-          if (debug) {
-            const rid = resp.headers.get('X-Request-Id');
-            const st = resp.headers.get('Server-Timing');
-            if (rid) log('request-id=', rid);
-            if (st) log('server-timing=', st);
-          }
           return resp;
         } finally {
           clearTimeout(timeout);
@@ -241,7 +229,7 @@
 
     main().catch(err => {
       const msg = (err && err.name === 'AbortError')
-        ? 'Request timed out. Try again (or add ?debug=1 and check console).'
+        ? 'Request timed out. Try again.'
         : String(err && (err.stack || err.message || err));
       document.getElementById('status').textContent = msg;
     });
