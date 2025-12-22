@@ -7,6 +7,7 @@ import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/sessio
 import { verifyTurnstileToken } from '../utils/turnstile.js';
 import { isValidAlbumId, isValidPhotoFileName, normalizeJpgName } from '../utils/validate.js';
 import { copyObject, listAllKeys } from '../utils/r2.js';
+import { readJson } from '../utils/http.js';
 
 function unauthorized() {
   return new Response("Unauthorized", {
@@ -54,14 +55,6 @@ function randomHex(bytesLen) {
 function generateAlbumSecret32() {
   // 16 bytes => 32 hex chars
   return randomHex(16);
-}
-
-async function readJson(request) {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }
 
 async function listAlbumInfoKeys(env) {

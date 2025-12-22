@@ -1,3 +1,5 @@
+import { sha256Hex, timingSafeEqual } from "./crypto.js";
+
 function base64UrlEncode(bytes) {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
@@ -27,8 +29,6 @@ function safeJsonParse(str) {
     return null;
   }
 }
-
-import { sha256Hex, timingSafeEqual } from "./crypto.js";
 
 async function hmacSha256Bytes(keyString, messageString) {
   const keyData = new TextEncoder().encode(String(keyString));

@@ -4,41 +4,15 @@ import { verifyTurnstileToken } from '../utils/turnstile.js';
 import { imageSig } from '../utils/crypto.js';
 import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.js';
 import { getAlbumIndex } from '../utils/albumIndex.js';
-
-function getCookieValue(cookieHeader, name) {
-  const raw = String(cookieHeader || "");
-  if (!raw) return "";
-  const parts = raw.split(";");
-  for (const p of parts) {
-    const idx = p.indexOf("=");
-    if (idx <= 0) continue;
-    const k = p.slice(0, idx).trim();
-    if (k !== name) continue;
-    return p.slice(idx + 1).trim();
-  }
-  return "";
-}
-
-function makeSetCookie({ name, value, maxAgeSec, secure }) {
-  const attrs = [
-    `${name}=${value}`,
-    `Path=/`,
-    `Max-Age=${Math.max(1, Math.floor(Number(maxAgeSec) || 0))}`,
-    `HttpOnly`,
-    `SameSite=Lax`,
-  ];
-  if (secure) attrs.push("Secure");
-  return attrs.join("; ");
-}
+import { readJson } from '../utils/http.js';
+import { getCookieValue, makeSetCookie } from '../utils/cookies.js';
 
 /**
  * Handle POST /api/album/<albumId>
  */
 export async function handleAlbumRequest(request, env, albumId) {
-  let body;
-  try {
-    body = await request.json();
-  } catch {
+  const body = await readJson(request);
+  if (!body) {
     return new Response("Bad JSON", { status: 400 });
   }
   const secret = String(body?.secret || "");
