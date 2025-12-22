@@ -3,6 +3,7 @@ import { json } from '../utils/response.js';
 import { verifyTurnstileToken } from '../utils/turnstile.js';
 import { imageSig } from '../utils/crypto.js';
 import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.js';
+import { getAlbumIndex } from '../utils/albumIndex.js';
 
 function getCookieValue(cookieHeader, name) {
   const raw = String(cookieHeader || "");
@@ -133,25 +134,33 @@ export async function handleAlbumRequest(request, env, albumId) {
   const info = checkResult.info;
   const matchedSecret = checkResult.matchedSecret;
 
-  // LIST photos/
+  // LIST photos/ (cached via Durable Object when available)
   const tList = Date.now();
-  const prefix = `albums/${albumId}/photos/`;
-  const listed = await env.BUCKET.list({ prefix });
+  const idx = await getAlbumIndex(env, albumId);
+  let names = null;
+  if (idx && idx.ok) {
+    names = idx.files.map((f) => f.name);
+  }
+  if (!names) {
+    // Fallback: direct R2 list (best-effort), same behavior as before.
+    const prefix = `albums/${albumId}/photos/`;
+    const listed = await env.BUCKET.list({ prefix });
+    names = listed.objects
+      .map(o => o.key)
+      .filter(k => k !== prefix)
+      .map(k => k.substring(prefix.length));
+  }
   mark('r2_list', tList);
 
-  const files = listed.objects
-    .map(o => o.key)
-    .filter(k => k !== prefix) // just in case
-    .map(async (k) => {
-      const name = k.substring(prefix.length);
-      const sig = await imageSig(albumId, name, matchedSecret);
-      const qs = `?s=${sig}`;
-      return {
-        name,
-        photoUrl: `/img/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(name)}${qs}`,
-        previewUrl: `/img/${encodeURIComponent(albumId)}/preview/${encodeURIComponent(name)}${qs}`
-      };
-    });
+  const files = names.map(async (name) => {
+    const sig = await imageSig(albumId, name, matchedSecret);
+    const qs = `?s=${sig}`;
+    return {
+      name,
+      photoUrl: `/img/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(name)}${qs}`,
+      previewUrl: `/img/${encodeURIComponent(albumId)}/preview/${encodeURIComponent(name)}${qs}`
+    };
+  });
 
   const tSig = Date.now();
   const resolvedFiles = await Promise.all(files);

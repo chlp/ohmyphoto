@@ -23,3 +23,11 @@ class_name = "RateLimiterDO"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RateLimiterDO"]
+
+[[durable_objects.bindings]]
+name = "ALBUM_INDEXER"
+class_name = "AlbumIndexDO"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["AlbumIndexDO"]

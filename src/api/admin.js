@@ -1,6 +1,7 @@
 import { json } from '../utils/response.js';
 import { getAlbumInfoWithSecrets } from '../utils/album.js';
 import { invalidateAlbumCache } from '../utils/album.js';
+import { invalidateAlbumIndex } from '../utils/albumIndex.js';
 import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/session.js';
 import { verifyTurnstileToken } from '../utils/turnstile.js';
 
@@ -349,6 +350,7 @@ export async function handleAdminRequest(request, env) {
       putJpeg(env, previewKey, preview)
     ]);
 
+    await invalidateAlbumIndex(env, albumId);
     return ok({ uploaded: true, albumId, name });
   }
 
@@ -371,6 +373,7 @@ export async function handleAdminRequest(request, env) {
       const [p0, p1] = await Promise.all([env.BUCKET.get(photoKey), env.BUCKET.get(previewKey)]);
       if (!p0 && !p1) return new Response("Not found", { status: 404 });
       await env.BUCKET.delete([photoKey, previewKey]);
+      await invalidateAlbumIndex(env, albumId);
       return ok({ deleted: true, albumId, name });
     }
 
@@ -396,6 +399,7 @@ export async function handleAdminRequest(request, env) {
     ]);
 
     await env.BUCKET.delete([photoKey, previewKey]);
+    await invalidateAlbumIndex(env, albumId);
     return ok({ renamed: true, albumId, from: name, to: newName });
   }
 
@@ -435,6 +439,7 @@ export async function handleAdminRequest(request, env) {
       httpMetadata: { contentType: "application/json; charset=utf-8" }
     });
     invalidateAlbumCache(albumId);
+    await invalidateAlbumIndex(env, albumId);
     // Return secret as a convenience for the UI/caller (still admin-protected).
     return ok({ albumId, title, secret });
   }
@@ -480,6 +485,10 @@ export async function handleAdminRequest(request, env) {
 
       invalidateAlbumCache(albumId);
       invalidateAlbumCache(newAlbumId);
+      await Promise.all([
+        invalidateAlbumIndex(env, albumId),
+        invalidateAlbumIndex(env, newAlbumId)
+      ]);
       return ok({ albumId: newAlbumId, title: nextTitle, renamedFrom: albumId });
     }
 
@@ -488,6 +497,7 @@ export async function handleAdminRequest(request, env) {
       httpMetadata: { contentType: "application/json; charset=utf-8" }
     });
     invalidateAlbumCache(albumId);
+    await invalidateAlbumIndex(env, albumId);
     return ok({ albumId, title: nextTitle });
   }
 
@@ -498,6 +508,7 @@ export async function handleAdminRequest(request, env) {
     if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
     const existed = await deleteAlbum(env, albumId);
     invalidateAlbumCache(albumId);
+    await invalidateAlbumIndex(env, albumId);
     if (!existed) return new Response("Not found", { status: 404 });
     return ok({ deleted: true, albumId });
   }
