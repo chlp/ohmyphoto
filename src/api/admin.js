@@ -255,7 +255,13 @@ export async function handleAdminRequest(request, env) {
         return new Response("Bot verification required", { status: 403 });
       }
       const clientIP = request.headers.get('CF-Connecting-IP') || null;
-      const turnstileResult = await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET_KEY, clientIP);
+      const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
+      const turnstileResult = await verifyTurnstileToken(
+        turnstileToken,
+        env.TURNSTILE_SECRET_KEY,
+        clientIP,
+        turnstileTimeoutMs
+      );
       if (!turnstileResult.success) {
         return new Response("Bot verification failed", { status: 403 });
       }

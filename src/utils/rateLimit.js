@@ -62,12 +62,18 @@ export async function enforceRateLimit(request, env) {
   const key = `${cfg.bucket}:${ip}`;
 
   const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(key));
-  const r = await stub.fetch('https://rate-limiter/check', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ limit: cfg.limit, windowMs: cfg.windowMs })
-  });
+  // Best-effort timeout (DO fetch can't be aborted, but we can stop awaiting).
+  const timeoutMs = Number(env.RATE_LIMIT_TIMEOUT_MS) || 500;
+  const r = await Promise.race([
+    stub.fetch('https://rate-limiter/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit: cfg.limit, windowMs: cfg.windowMs })
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
+  ]);
 
+  if (!r) return null; // fail-open on timeout
   if (!r.ok) {
     // If limiter misbehaves, fail-open (avoid taking the whole app down)
     return null;

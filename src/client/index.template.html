@@ -29,26 +29,34 @@
     async function main() {
       const albumId = getAlbumIdFromPath();
       const secret = (location.hash || '').replace(/^#/, '');
+      const debug = new URL(location.href).searchParams.get('debug') === '1';
 
       const statusEl = document.getElementById('status');
       const gridEl = document.getElementById('grid');
       const titleEl = document.getElementById('title');
 
+      const startedAt = performance.now();
+      const log = (...args) => { if (debug) console.log('[ohmyphoto]', ...args); };
+      const setStatus = (s) => { statusEl.textContent = s; log('status:', s); };
+      const ms = () => Math.round(performance.now() - startedAt);
+
       if (!albumId) {
-        statusEl.textContent = 'No albumId in URL. Expected /<albumId>#<secret>';
+        setStatus('No albumId in URL. Expected /<albumId>#<secret>');
         return;
       }
       if (!secret) {
-        statusEl.textContent = 'No secret in URL hash. Expected /<albumId>#<secret>';
+        setStatus('No secret in URL hash. Expected /<albumId>#<secret>');
         return;
       }
 
-      statusEl.textContent = 'Loading...';
+      setStatus('Loading...');
 
       // Get Turnstile token if site key is configured
       let turnstileToken = '';
       if (TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY !== 'YOUR_TURNSTILE_SITE_KEY') {
         try {
+          setStatus('Verifying...');
+          const t0 = performance.now();
           // Wait for Turnstile script to load (poll with timeout)
           await new Promise((resolve) => {
             const startedAt = Date.now();
@@ -97,28 +105,50 @@
               try { turnstile.execute(widgetId); } catch { resolve(''); }
             });
           }
+          log('turnstile token len=', String(turnstileToken || '').length, 'ms=', Math.round(performance.now() - t0));
         } catch (err) {
           console.warn('Turnstile verification failed:', err);
           // Continue without token if Turnstile fails
         }
       }
 
-      const resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ secret, turnstileToken })
-      });
+      setStatus('Fetching album...');
+      const controller = new AbortController();
+      const timeoutMs = 15000;
+      const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
+      let resp;
+      try {
+        const tApi = performance.now();
+        resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(debug ? { 'X-OhMyPhoto-Debug': '1' } : {})
+          },
+          body: JSON.stringify({ secret, turnstileToken }),
+          signal: controller.signal
+        });
+        log('album api status=', resp.status, 'ms=', Math.round(performance.now() - tApi));
+        if (debug) {
+          const rid = resp.headers.get('X-Request-Id');
+          const st = resp.headers.get('Server-Timing');
+          if (rid) log('request-id=', rid);
+          if (st) log('server-timing=', st);
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
 
       if (resp.status === 404) {
-        statusEl.textContent = 'Album not found (404)';
+        setStatus('Album not found (404)');
         return;
       }
       if (resp.status === 403) {
-        statusEl.textContent = 'Forbidden (403): wrong secret';
+        setStatus('Forbidden (403): wrong secret / bot check failed');
         return;
       }
       if (!resp.ok) {
-        statusEl.textContent = `Error: ${resp.status}`;
+        setStatus(`Error: ${resp.status}`);
         return;
       }
 
@@ -130,9 +160,9 @@
       document.title = albumTitle === baseTitle ? baseTitle : `${albumTitle} | ${baseTitle}`;
 
       if (data.files.length === 0) {
-        statusEl.textContent = 'This is the correct link, but the photos haven’t been uploaded here yet.';
+        setStatus('This is the correct link, but the photos haven’t been uploaded here yet.');
       } else {
-        statusEl.textContent = '';
+        setStatus('');
       }
 
       // Render previews if worker returns previewUrl
@@ -162,7 +192,10 @@
     }
 
     main().catch(err => {
-      document.getElementById('status').textContent = String(err);
+      const msg = (err && err.name === 'AbortError')
+        ? 'Request timed out. Try again (or add ?debug=1 and check console).'
+        : String(err && (err.stack || err.message || err));
+      document.getElementById('status').textContent = msg;
     });
   </script>
 </body>
