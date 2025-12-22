@@ -94,9 +94,7 @@
                     resolve(''); // Continue without token on error
                   }
                 },
-                // Current Turnstile JS API accepts: "compact" | "flexible" | "normal"
-                size: 'normal',
-                // Avoid auto-execution; we will execute explicitly once.
+                size: 'invisible',
                 execution: 'execute'
               });
 
