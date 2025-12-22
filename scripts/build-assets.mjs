@@ -7,6 +7,8 @@ const INDEX_OUT_PATH = path.join(ROOT, "public", "index.html");
 const ADMIN_TEMPLATE_PATH = path.join(ROOT, "src", "client", "admin.template.html");
 const ADMIN_OUT_PATH = path.join(ROOT, "public", "admin.html");
 
+console.log("TURNSTILE_SITE_KEY:", process.env.TURNSTILE_SITE_KEY ? "set" : "missing");
+
 async function readDevVars() {
   try {
     const p = path.join(ROOT, ".dev.vars");
