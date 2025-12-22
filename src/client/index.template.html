@@ -13,9 +13,16 @@
 <body>
   <h1 id="title">OhMyPhoto</h1>
   <div id="status"></div>
-  <!-- Turnstile widget container: collapsed by default; expands only if verification is needed -->
-  <div id="turnstile-wrap" style="height:0;overflow:hidden;">
-    <div id="turnstile-widget" style="margin:12px 0;min-height:72px;"></div>
+  <!-- Turnstile containers:
+       - Invisible/offscreen is used first (no UI).
+       - Modal is shown only if invisible execution can't get a token (likely needs interaction). -->
+  <div id="turnstile-offscreen" style="position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;">
+    <div id="turnstile-widget-invisible"></div>
+  </div>
+  <div id="turnstile-modal" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:9999;">
+    <div style="background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px;max-width:360px;width:calc(100% - 32px);">
+      <div id="turnstile-widget-visible" style="min-height:72px;"></div>
+    </div>
   </div>
   <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
 
@@ -86,8 +93,6 @@
       async function getTurnstileTokenOnce() {
         if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY === 'YOUR_TURNSTILE_SITE_KEY') return '';
         try {
-          setStatus('Verifying...');
-          const t0 = performance.now();
           // Wait for Turnstile script to load (poll with timeout)
           await new Promise((resolve) => {
             const startedAt = Date.now();
@@ -101,34 +106,30 @@
 
           if (typeof turnstile === 'undefined') return '';
 
-          // Expand container only when verification is actually needed.
-          const wrap = document.getElementById('turnstile-wrap');
-          if (wrap) wrap.style.height = '96px';
+          const modal = document.getElementById('turnstile-modal');
 
-          const token = await new Promise((resolve) => {
+          // 1) Try invisible/offscreen first (no UI)
+          const invisibleToken = await new Promise((resolve) => {
             let resolved = false;
-            const timeout = setTimeout(() => {
-              if (!resolved) {
-                resolved = true;
-                resolve(''); // Timeout - continue without token
-              }
-            }, 5000);
+            const overallTimeout = setTimeout(() => {
+              if (resolved) return;
+              resolved = true;
+              resolve('');
+            }, 2000); // if we can't get a token quickly, likely needs interaction
 
-            const widgetId = turnstile.render('#turnstile-widget', {
+            const widgetId = turnstile.render('#turnstile-widget-invisible', {
               sitekey: TURNSTILE_SITE_KEY,
               callback: (t) => {
-                if (!resolved) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  resolve(t);
-                }
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(overallTimeout);
+                resolve(t);
               },
               'error-callback': () => {
-                if (!resolved) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  resolve('');
-                }
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(overallTimeout);
+                resolve('');
               },
               size: 'invisible',
               execution: 'execute',
@@ -138,11 +139,43 @@
             try { turnstile.reset(widgetId); } catch {}
             try { turnstile.execute(widgetId); } catch { resolve(''); }
           });
+          if (invisibleToken) return invisibleToken;
 
-          log('turnstile token len=', String(token || '').length, 'ms=', Math.round(performance.now() - t0));
-          return token || '';
+          // 2) Fall back to interactive modal if invisible couldn't get a token
+          if (modal) modal.style.display = 'flex';
+          const visibleToken = await new Promise((resolve) => {
+            let resolved = false;
+            const timeout = setTimeout(() => {
+              if (resolved) return;
+              resolved = true;
+              resolve('');
+            }, 20000);
+
+            const widgetId = turnstile.render('#turnstile-widget-visible', {
+              sitekey: TURNSTILE_SITE_KEY,
+              callback: (t) => {
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(timeout);
+                resolve(t);
+              },
+              'error-callback': () => {
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(timeout);
+                resolve('');
+              },
+              size: 'compact',
+            });
+
+            // For visible widget, user interaction may be required; no execute() call needed.
+            try { turnstile.reset(widgetId); } catch {}
+          });
+          if (modal) modal.style.display = 'none';
+          return visibleToken || '';
         } catch (err) {
-          console.warn('Turnstile verification failed:', err);
+          const modal = document.getElementById('turnstile-modal');
+          if (modal) modal.style.display = 'none';
           return '';
         }
       }

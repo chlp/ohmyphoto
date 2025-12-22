@@ -188,7 +188,6 @@
           try { turnstile.execute(widgetId); } catch { resolve(''); }
         });
       } catch (err) {
-        console.warn('Turnstile verification failed:', err);
         return '';
       }
     }
