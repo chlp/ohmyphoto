@@ -19,7 +19,10 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
 
 ## Bot protection (Cloudflare Turnstile captcha)
 
-See [TURNSTILE_SETUP.md](./TURNSTILE_SETUP.md).
+- **Enable/disable**: if `TURNSTILE_SECRET_KEY` is set, the Worker will require Turnstile verification; if it’s unset, bot protection is effectively disabled.
+- **Client flow**: the client tries to obtain a Turnstile token (invisible first, with a UI fallback if needed).
+- **No captcha on every request**: after a successful verification, the Worker issues a **short-lived signed HttpOnly “human bypass” cookie** (configurable) so subsequent API calls can skip Turnstile until it expires.
+- **Signed image URLs**: photo/preview URLs include a signature (`?s=...`) derived from the album secret, so the browser can fetch images without re-sending the secret (and without re-running Turnstile per image).
 
 ## Admin (create/update/rename/delete albums)
 
