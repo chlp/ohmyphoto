@@ -28,7 +28,7 @@ function safeJsonParse(str) {
   }
 }
 
-import { sha256Hex } from "./crypto.js";
+import { sha256Hex, timingSafeEqual } from "./crypto.js";
 
 async function hmacSha256Bytes(keyString, messageString) {
   const keyData = new TextEncoder().encode(String(keyString));
@@ -42,14 +42,6 @@ async function hmacSha256Bytes(keyString, messageString) {
   );
   const sig = await crypto.subtle.sign("HMAC", key, msgData);
   return new Uint8Array(sig);
-}
-
-function timingSafeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
 }
 
 /**

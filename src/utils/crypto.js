@@ -13,6 +13,20 @@ export async function sha256Hex(input) {
 }
 
 /**
+ * Timing-safe string compare.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+export function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+
+/**
  * Signature for image URLs: sha256hex(`${albumId}:${name}:${secret}`)
  * @param {string} albumId
  * @param {string} name

@@ -63,7 +63,6 @@
         const timeoutMs = 15000;
         const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
         try {
-          const tApi = performance.now();
           const resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
             method: 'POST',
             headers: {

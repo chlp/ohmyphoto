@@ -1,6 +1,4 @@
-function isValidAlbumId(albumId) {
-  return /^[a-zA-Z0-9_-]{1,64}$/.test(String(albumId || ""));
-}
+import { isValidAlbumId } from "./validate.js";
 
 /**
  * Get cached album index (photo names + hasPreview) from Durable Object.

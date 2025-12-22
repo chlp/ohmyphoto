@@ -1,19 +1,7 @@
 import { json } from '../utils/response.js';
 
-function isValidAlbumId(albumId) {
-  return /^[a-zA-Z0-9_-]{1,64}$/.test(String(albumId || ""));
-}
-
-async function listAllKeys(env, prefix) {
-  const keys = [];
-  let cursor = undefined;
-  do {
-    const listed = await env.BUCKET.list({ prefix, cursor });
-    for (const o of listed.objects) keys.push(o.key);
-    cursor = listed.cursor;
-  } while (cursor);
-  return keys;
-}
+import { isValidAlbumId } from '../utils/validate.js';
+import { listAllKeys } from '../utils/r2.js';
 
 /**
  * Durable Object: caches album index (photo names + whether preview exists).
@@ -47,8 +35,8 @@ export class AlbumIndexDO {
     const previewPrefix = `albums/${albumId}/preview/`;
 
     const [photoKeys, previewKeys] = await Promise.all([
-      listAllKeys(this.env, photosPrefix),
-      listAllKeys(this.env, previewPrefix)
+      listAllKeys(this.env.BUCKET, photosPrefix),
+      listAllKeys(this.env.BUCKET, previewPrefix)
     ]);
 
     const photoNames = photoKeys

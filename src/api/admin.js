@@ -2,8 +2,11 @@ import { json } from '../utils/response.js';
 import { getAlbumInfoWithSecrets } from '../utils/album.js';
 import { invalidateAlbumCache } from '../utils/album.js';
 import { invalidateAlbumIndex } from '../utils/albumIndex.js';
+import { timingSafeEqual } from '../utils/crypto.js';
 import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/session.js';
 import { verifyTurnstileToken } from '../utils/turnstile.js';
+import { isValidAlbumId, isValidPhotoFileName, normalizeJpgName } from '../utils/validate.js';
+import { copyObject, listAllKeys } from '../utils/r2.js';
 
 function unauthorized() {
   return new Response("Unauthorized", {
@@ -12,14 +15,6 @@ function unauthorized() {
       "WWW-Authenticate": "Bearer realm=\"admin\""
     }
   });
-}
-
-function timingSafeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string") return false;
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
 }
 
 async function authorizeAdmin(request, env) {
@@ -48,11 +43,6 @@ function ok(obj = {}) {
   return json(obj, 200, { "Cache-Control": "no-store" });
 }
 
-function isValidAlbumId(albumId) {
-  // keep it simple: URL/path safe
-  return /^[a-zA-Z0-9_-]{1,64}$/.test(albumId);
-}
-
 function randomHex(bytesLen) {
   const bytes = new Uint8Array(bytesLen);
   crypto.getRandomValues(bytes);
@@ -64,33 +54,6 @@ function randomHex(bytesLen) {
 function generateAlbumSecret32() {
   // 16 bytes => 32 hex chars
   return randomHex(16);
-}
-
-function normalizeJpgName(input) {
-  let name = String(input || "").trim();
-  if (!name) return "";
-  // Drop any path components (defense-in-depth)
-  name = name.replace(/^.*[\\/]/, "");
-  // Ensure .jpg extension
-  if (!/\.jpe?g$/i.test(name)) {
-    name = name.replace(/\.[^.]+$/, ""); // strip one extension if present
-    name = `${name}.jpg`;
-  } else {
-    name = name.replace(/\.jpeg$/i, ".jpg");
-  }
-  return name;
-}
-
-function isValidPhotoFileName(name) {
-  const n = String(name || "").trim();
-  if (!n) return false;
-  if (n.length > 160) return false;
-  if (n.includes("/") || n.includes("\\") || n.includes("\0")) return false;
-  if (n.startsWith(".")) return false;
-  // predictable + URL-safe-ish (space allowed for convenience)
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._ -]*$/.test(n)) return false;
-  if (!/\.jpg$/i.test(n)) return false;
-  return true;
 }
 
 async function readJson(request) {
@@ -134,29 +97,6 @@ function normalizeSecretsToObject(secretsList) {
   return out;
 }
 
-async function listAllKeys(env, prefix) {
-  const keys = [];
-  let cursor = undefined;
-  do {
-    const listed = await env.BUCKET.list({ prefix, cursor });
-    for (const o of listed.objects) keys.push(o.key);
-    cursor = listed.cursor;
-  } while (cursor);
-  return keys;
-}
-
-async function copyObject(env, fromKey, toKey) {
-  const obj = await env.BUCKET.get(fromKey);
-  if (!obj) return;
-
-  // Best-effort preserve metadata when available
-  const opts = {};
-  if (obj.httpMetadata) opts.httpMetadata = obj.httpMetadata;
-  if (obj.customMetadata) opts.customMetadata = obj.customMetadata;
-
-  await env.BUCKET.put(toKey, obj.body, opts);
-}
-
 async function getAlbumExists(env, albumId) {
   const existing = await env.BUCKET.get(`albums/${albumId}/info.json`);
   return !!existing;
@@ -166,8 +106,8 @@ async function listAlbumPhotoNames(env, albumId) {
   const photosPrefix = `albums/${albumId}/photos/`;
   const previewPrefix = `albums/${albumId}/preview/`;
   const [photoKeys, previewKeys] = await Promise.all([
-    listAllKeys(env, photosPrefix),
-    listAllKeys(env, previewPrefix)
+    listAllKeys(env.BUCKET, photosPrefix),
+    listAllKeys(env.BUCKET, previewPrefix)
   ]);
 
   const photoNames = photoKeys
@@ -208,14 +148,14 @@ async function renameAlbum(env, oldAlbumId, newAlbumId) {
     throw new Error("destination_exists");
   }
 
-  const keys = await listAllKeys(env, oldPrefix);
+  const keys = await listAllKeys(env.BUCKET, oldPrefix);
   if (!keys.length) {
     throw new Error("source_missing");
   }
 
   for (const key of keys) {
     const newKey = newPrefix + key.substring(oldPrefix.length);
-    await copyObject(env, key, newKey);
+    await copyObject(env.BUCKET, key, newKey);
   }
 
   // Delete old after copy
@@ -226,7 +166,7 @@ async function renameAlbum(env, oldAlbumId, newAlbumId) {
 
 async function deleteAlbum(env, albumId) {
   const prefix = `albums/${albumId}/`;
-  const keys = await listAllKeys(env, prefix);
+  const keys = await listAllKeys(env.BUCKET, prefix);
   if (!keys.length) return false;
   for (let i = 0; i < keys.length; i += 100) {
     await env.BUCKET.delete(keys.slice(i, i + 100));
@@ -394,8 +334,8 @@ export async function handleAdminRequest(request, env) {
     if (dstPhoto || dstPreview) return conflict("Destination name already exists");
 
     await Promise.all([
-      oldPhoto ? copyObject(env, photoKey, newPhotoKey) : Promise.resolve(),
-      oldPreview ? copyObject(env, previewKey, newPreviewKey) : Promise.resolve()
+      oldPhoto ? copyObject(env.BUCKET, photoKey, newPhotoKey) : Promise.resolve(),
+      oldPreview ? copyObject(env.BUCKET, previewKey, newPreviewKey) : Promise.resolve()
     ]);
 
     await env.BUCKET.delete([photoKey, previewKey]);
