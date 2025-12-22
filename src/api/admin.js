@@ -13,6 +13,14 @@ function unauthorized() {
   });
 }
 
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+
 async function authorizeAdmin(request, env) {
   const expected = String(env.ADMIN_TOKEN || "");
   if (!expected) return unauthorized();
@@ -20,13 +28,6 @@ async function authorizeAdmin(request, env) {
   const m = auth.match(/^Bearer\s+(.+)$/i);
   const token = m ? m[1] : "";
   if (!token) return unauthorized();
-
-  // Optional escape hatch for non-browser tooling (curl/scripts).
-  // WARNING: enabling this makes ADMIN_TOKEN brute-forceable on any /api/admin/* endpoint.
-  const allowRaw = String(env.ADMIN_TOKEN_ALLOW_RAW || "").toLowerCase();
-  if ((allowRaw === "1" || allowRaw === "true" || allowRaw === "yes") && token === expected) {
-    return null;
-  }
 
   // Otherwise treat as a signed session token
   const v = await verifyAdminSessionToken(token, expected);
@@ -260,7 +261,7 @@ export async function handleAdminRequest(request, env) {
       }
     }
 
-    if (!provided || provided !== expected) return unauthorized();
+    if (!provided || !timingSafeEqual(provided, expected)) return unauthorized();
 
     const issued = await issueAdminSessionToken(expected);
     return ok({ sessionToken: issued.token, iat: issued.payload.iat, exp: issued.payload.exp });

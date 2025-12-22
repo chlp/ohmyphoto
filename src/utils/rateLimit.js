@@ -19,7 +19,7 @@ function getBucketConfig(request) {
   if (request.method === 'OPTIONS') return null;
 
   if (path === '/api/admin/session' && request.method === 'POST') {
-    return { bucket: 'admin_session', limit: 20, windowMs: 10 * 60 * 1000 };
+    return { bucket: 'admin_session', limit: 10, windowMs: 10 * 60 * 1000 };
   }
   if (path.startsWith('/api/admin/')) {
     return { bucket: 'admin_api', limit: 300, windowMs: 5 * 60 * 1000 };
