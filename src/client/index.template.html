@@ -7,14 +7,15 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <title>OhMyPhoto</title>
   <meta name="robots" content="noindex,nofollow" />
+  <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body>
   <h1 id="title">OhMyPhoto</h1>
   <div id="status"></div>
+  <!-- Turnstile widget container (kept small; can become interactive if needed) -->
+  <div id="turnstile-widget" style="margin:12px 0;min-height:72px;"></div>
   <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
-  <!-- Turnstile widget container (kept off-screen to avoid layout impact) -->
-  <div id="turnstile-widget" style="position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;"></div>
 
   <script>
     function getAlbumIdFromPath() {
@@ -94,8 +95,15 @@
                     resolve(''); // Continue without token on error
                   }
                 },
+                // For invisible widgets, Turnstile will not run unless we call execute().
                 size: 'invisible',
+                execution: 'execute',
+                appearance: 'interaction-only',
               });
+
+              // IMPORTANT: for size=invisible + execution=execute, we must execute explicitly.
+              try { turnstile.reset(widgetId); } catch {}
+              try { turnstile.execute(widgetId); } catch { resolve(''); }
             });
           }
           log('turnstile token len=', String(turnstileToken || '').length, 'ms=', Math.round(performance.now() - t0));
