@@ -7,10 +7,9 @@ export function createTtlCache({ maxEntries = 1000, ttlMs = 60_000 } = {}) {
 
   function prune() {
     const now = Date.now();
-    // Drop expired first
+    // Drop expired entries (cannot early-break: expiresAt is not ordered by insertion)
     for (const [k, v] of map) {
       if (v.expiresAt <= now) map.delete(k);
-      else break; // insertion order: stop early most of the time
     }
     // Enforce size (drop oldest)
     while (map.size > maxEntries) {
@@ -21,6 +20,8 @@ export function createTtlCache({ maxEntries = 1000, ttlMs = 60_000 } = {}) {
 
   return {
     get(key) {
+      // keep map from accumulating expired entries during read-heavy workloads
+      if (map.size) prune();
       const v = map.get(key);
       if (!v) return undefined;
       if (v.expiresAt <= Date.now()) {

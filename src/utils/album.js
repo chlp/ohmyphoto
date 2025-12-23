@@ -1,13 +1,4 @@
-function extractSecrets(info) {
-  const secrets = new Set();
-  if (info && typeof info.secret === "string" && info.secret) secrets.add(info.secret);
-  if (info && info.secrets && typeof info.secrets === "object") {
-    for (const k of Object.keys(info.secrets)) {
-      if (k) secrets.add(k);
-    }
-  }
-  return [...secrets];
-}
+import { extractSecrets } from './albumSecrets.js';
 
 export async function invalidateAlbumCache(env, albumId) {
   // Best-effort: clear persistent cache in Durable Object (if configured)

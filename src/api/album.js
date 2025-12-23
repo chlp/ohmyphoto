@@ -6,19 +6,26 @@ import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.
 import { getAlbumIndex } from '../utils/albumIndex.js';
 import { getClientIp, readJson } from '../utils/http.js';
 import { getCookieValue, makeSetCookie } from '../utils/cookies.js';
+import { listAllKeys } from '../utils/r2.js';
 
 /**
  * Handle POST /api/album/<albumId>
  */
 async function doFetchJsonWithTimeout(stub, url, body, timeoutMs) {
-  return await Promise.race([
-    stub.fetch(url, {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort('timeout'), timeoutMs);
+  try {
+    return await stub.fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    }),
-    new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
-  ]);
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function adjustTurnstileSoftCounter(env, ip, delta, windowMs) {
@@ -34,7 +41,7 @@ async function adjustTurnstileSoftCounter(env, ip, delta, windowMs) {
 }
 
 async function peekTurnstileSoftCount(env, ip) {
-  if (!env || !env.RATE_LIMITER) return false;
+  if (!env || !env.RATE_LIMITER) return { count: 0, resetAtMs: 0 }; // fail-open
   const timeoutMs = Number(env.TURNSTILE_SOFT_DO_TIMEOUT_MS) || 300;
   const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(`turnstile_soft:${ip}`));
   const r = await doFetchJsonWithTimeout(
@@ -175,9 +182,8 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   if (!names) {
     // Fallback: direct R2 list (best-effort), same behavior as before.
     const prefix = `albums/${albumId}/photos/`;
-    const listed = await env.BUCKET.list({ prefix });
-    names = listed.objects
-      .map(o => o.key)
+    const keys = await listAllKeys(env.BUCKET, prefix);
+    names = keys
       .filter(k => k !== prefix)
       .map(k => k.substring(prefix.length));
   }

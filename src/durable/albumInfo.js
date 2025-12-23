@@ -1,16 +1,6 @@
 import { json } from '../utils/response.js';
 import { isValidAlbumId } from '../utils/validate.js';
-
-function extractSecrets(info) {
-  const secrets = new Set();
-  if (info && typeof info.secret === 'string' && info.secret) secrets.add(info.secret);
-  if (info && info.secrets && typeof info.secrets === 'object') {
-    for (const k of Object.keys(info.secrets)) {
-      if (k) secrets.add(k);
-    }
-  }
-  return [...secrets];
-}
+import { extractSecrets } from '../utils/albumSecrets.js';
 
 /**
  * Durable Object: caches album info.json + extracted secrets persistently.
