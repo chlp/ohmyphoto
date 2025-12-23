@@ -5,7 +5,7 @@ import { handleAdminRequest } from './api/admin.js';
 /**
  * Router for handling different routes
  */
-export async function route(request, env) {
+export async function route(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
 
@@ -18,7 +18,7 @@ export async function route(request, env) {
   const mApi = path.match(/^\/api\/album\/([^/]+)$/);
   if (mApi && request.method === "POST") {
     const albumId = decodeURIComponent(mApi[1]);
-    return handleAlbumRequest(request, env, albumId);
+    return handleAlbumRequest(request, env, albumId, ctx);
   }
 
   // GET /img/<albumId>/(photos|preview)/<name>

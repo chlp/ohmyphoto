@@ -22,6 +22,11 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
 - **Enable/disable**: if `TURNSTILE_SECRET_KEY` is set, the Worker will require Turnstile verification; if it’s unset, bot protection is effectively disabled.
 - **Client flow**: the client tries to obtain a Turnstile token (invisible first, with a UI fallback if needed).
 - **No captcha on every request**: after a successful verification, the Worker issues a **short-lived signed HttpOnly “human bypass” cookie** (configurable) so subsequent API calls can skip Turnstile until it expires.
+- **Soft enforcement (new)**: Turnstile is only *required* for an IP after it makes more than `TURNSTILE_SOFT_THRESHOLD` album API requests within `TURNSTILE_SOFT_WINDOW_MS` **without** a valid bypass cookie and **without** passing Turnstile. Before the threshold is exceeded, requests are allowed to proceed without waiting; if a token is provided, the Worker verifies it in the background and only increments the counter if verification fails (so successful requests don’t mutate the counter).
+- **Soft enforcement env vars**:
+  - `TURNSTILE_SOFT_THRESHOLD` (default: `100`)
+  - `TURNSTILE_SOFT_WINDOW_MS` (default: `86400000` i.e. 24h)
+  - `TURNSTILE_SOFT_DO_TIMEOUT_MS` (default: `300`) – best-effort timeout for the DO calls (fail-open)
 - **Signed image URLs**: photo/preview URLs include a signature (`?s=...`) derived from the album secret, so the browser can fetch images without re-sending the secret (and without re-running Turnstile per image).
 
 ## Admin (create/update/rename/delete albums)

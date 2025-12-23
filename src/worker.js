@@ -4,12 +4,12 @@ export { RateLimiterDO } from './durable/rateLimiter.js';
 export { AlbumIndexDO } from './durable/albumIndex.js';
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const limited = await enforceRateLimit(request, env);
     if (limited) {
       return limited;
     }
 
-    return await route(request, env);
+    return await route(request, env, ctx);
   }
 };
