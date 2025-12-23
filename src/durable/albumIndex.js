@@ -78,7 +78,7 @@ export class AlbumIndexDO {
     const ttlMs =
       Number(body.ttlMs) ||
       Number(this.env.ALBUM_INDEX_TTL_MS) ||
-      60_000;
+      7 * 24 * 60 * 60 * 1000;
 
     const now = Date.now();
     const v = await this.load();
