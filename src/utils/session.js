@@ -88,13 +88,13 @@ export async function verifyAdminSessionToken(sessionToken, adminToken, nowMs = 
  * Issue a short-lived "human verified" token (HMAC-SHA256), meant to be stored in a cookie.
  * Token format: base64url(payloadJson) + "." + base64url(hmac(payload))
  *
- * Payload includes a short hash of the User-Agent to reduce cookie re-use across different clients.
+ * Payload includes a short hash of the client IP to reduce cookie re-use across different clients.
  */
-export async function issueHumanBypassToken(secretKey, userAgent, ttlMs = 30 * 60 * 1000, nowMs = Date.now()) {
+export async function issueHumanBypassToken(secretKey, clientIp, ttlMs = 30 * 60 * 1000, nowMs = Date.now()) {
   const iat = nowMs;
   const exp = nowMs + Math.max(5_000, Number(ttlMs) || 0);
-  const uaHash = String(await sha256Hex(String(userAgent || ""))).slice(0, 16);
-  const payload = { v: 1, iat, exp, u: uaHash };
+  const ipHash = String(await sha256Hex(String(clientIp || ""))).slice(0, 16);
+  const payload = { v: 1, iat, exp, i: ipHash };
   const payloadB64 = base64UrlEncodeJson(payload);
   const sigBytes = await hmacSha256Bytes(secretKey, payloadB64);
   const sigB64 = base64UrlEncode(sigBytes);
@@ -105,7 +105,7 @@ export async function issueHumanBypassToken(secretKey, userAgent, ttlMs = 30 * 6
  * Verify "human verified" token.
  * @returns {{ok:true,payload:any}|{ok:false}}
  */
-export async function verifyHumanBypassToken(token, secretKey, userAgent, nowMs = Date.now()) {
+export async function verifyHumanBypassToken(token, secretKey, clientIp, nowMs = Date.now()) {
   const t = String(token || "");
   const parts = t.split(".");
   if (parts.length !== 2) return { ok: false };
@@ -124,8 +124,8 @@ export async function verifyHumanBypassToken(token, secretKey, userAgent, nowMs 
   if (typeof payload.iat !== "number" || typeof payload.exp !== "number") return { ok: false };
   if (payload.exp <= nowMs) return { ok: false };
 
-  const uaHash = String(await sha256Hex(String(userAgent || ""))).slice(0, 16);
-  if (typeof payload.u !== "string" || payload.u !== uaHash) return { ok: false };
+  const ipHash = String(await sha256Hex(String(clientIp || ""))).slice(0, 16);
+  if (typeof payload.i !== "string" || payload.i !== ipHash) return { ok: false };
 
   return { ok: true, payload };
 }

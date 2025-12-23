@@ -4,7 +4,7 @@ import { verifyTurnstileToken } from '../utils/turnstile.js';
 import { imageSig } from '../utils/crypto.js';
 import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.js';
 import { getAlbumIndex } from '../utils/albumIndex.js';
-import { readJson } from '../utils/http.js';
+import { getClientIp, readJson } from '../utils/http.js';
 import { getCookieValue, makeSetCookie } from '../utils/cookies.js';
 
 /**
@@ -25,17 +25,17 @@ export async function handleAlbumRequest(request, env, albumId) {
   if (env.TURNSTILE_SECRET_KEY) {
     const cookieEnabled = String(env.TURNSTILE_BYPASS_COOKIE || "1") !== "0";
     const cookieName = String(env.TURNSTILE_BYPASS_COOKIE_NAME || "ohmyphoto_human");
-    const ttlMs = Number(env.TURNSTILE_BYPASS_COOKIE_TTL_MS) || 30 * 60 * 1000;
-    const ua = request.headers.get("User-Agent") || "";
+    const ttlMs = Number(env.TURNSTILE_BYPASS_COOKIE_TTL_MS) || 7 * 24 * 60 * 1000;
+    const clientIp = getClientIp(request);
     const secure = new URL(request.url).protocol === "https:";
 
     if (cookieEnabled) {
       const cookieToken = getCookieValue(request.headers.get("Cookie"), cookieName);
       if (cookieToken) {
-        const ok = await verifyHumanBypassToken(cookieToken, env.TURNSTILE_SECRET_KEY, ua);
+        const ok = await verifyHumanBypassToken(cookieToken, env.TURNSTILE_SECRET_KEY, clientIp);
         if (ok.ok) {
           // Sliding TTL: refresh cookie.
-          const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, ua, ttlMs);
+          const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, clientIp, ttlMs);
           bypassCookieHeader = makeSetCookie({
             name: cookieName,
             value: issued.token,
@@ -64,7 +64,7 @@ export async function handleAlbumRequest(request, env, albumId) {
       }
 
       if (cookieEnabled) {
-        const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, ua, ttlMs);
+        const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, clientIp, ttlMs);
         bypassCookieHeader = makeSetCookie({
           name: cookieName,
           value: issued.token,
