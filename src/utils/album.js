@@ -1,6 +1,6 @@
 import { createTtlCache } from './cache.js';
 
-const albumInfoCache = createTtlCache({ maxEntries: 500, ttlMs: 60_000 });
+const albumInfoCache = createTtlCache({ maxEntries: 500, ttlMs: 7 * 24 * 60 * 60 * 1000 });
 
 function extractSecrets(info) {
   const secrets = new Set();
@@ -31,7 +31,7 @@ export async function getAlbumInfoWithSecrets(albumId, env) {
   const infoObj = await env.BUCKET.get(infoKey);
   if (!infoObj) {
     const res = { ok: false, status: 404 };
-    albumInfoCache.set(albumId, res, 15_000); // cache 404 briefly
+    albumInfoCache.set(albumId, res, 7 * 24 * 60 * 60 * 1000); // cache 404 briefly
     return res;
   }
 
@@ -41,7 +41,7 @@ export async function getAlbumInfoWithSecrets(albumId, env) {
   } catch {
     const res = { ok: false, status: 500 };
     // don't cache parse errors for too long
-    albumInfoCache.set(albumId, res, 5_000);
+    albumInfoCache.set(albumId, res, 60 * 1000);
     return res;
   }
 
