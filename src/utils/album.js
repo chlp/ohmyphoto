@@ -1,7 +1,3 @@
-import { createTtlCache } from './cache.js';
-
-const albumInfoCache = createTtlCache({ maxEntries: 500, ttlMs: 7 * 24 * 60 * 60 * 1000 });
-
 function extractSecrets(info) {
   const secrets = new Set();
   if (info && typeof info.secret === "string" && info.secret) secrets.add(info.secret);
@@ -13,8 +9,17 @@ function extractSecrets(info) {
   return [...secrets];
 }
 
-export function invalidateAlbumCache(albumId) {
-  albumInfoCache.delete(albumId);
+export async function invalidateAlbumCache(env, albumId) {
+  // Best-effort: clear persistent cache in Durable Object (if configured)
+  if (!env || !env.ALBUM_INFO) return;
+  const stub = env.ALBUM_INFO.get(env.ALBUM_INFO.idFromName(`album:${albumId}`));
+  await stub
+    .fetch('https://album-info/invalidate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'invalidate' })
+    })
+    .catch(() => null);
 }
 
 /**
@@ -24,31 +29,43 @@ export function invalidateAlbumCache(albumId) {
  * @returns {Promise<{ok: true, info: any, secrets: string[]} | {ok: false, status: 404|500}>}
  */
 export async function getAlbumInfoWithSecrets(albumId, env) {
-  const cached = albumInfoCache.get(albumId);
-  if (cached) return cached;
+  // Prefer persistent DO cache (survives cold starts / isolate restarts).
+  if (env && env.ALBUM_INFO) {
+    const stub = env.ALBUM_INFO.get(env.ALBUM_INFO.idFromName(`album:${albumId}`));
+    const r = await stub
+      .fetch('https://album-info/get', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get', albumId })
+      })
+      .catch(() => null);
+    if (r && r.ok) {
+      const data = await r.json().catch(() => null);
+      if (data && data.ok === true && data.info) {
+        return { ok: true, info: data.info, secrets: Array.isArray(data.secrets) ? data.secrets : extractSecrets(data.info) };
+      }
+      if (data && data.ok === false && (data.status === 404 || data.status === 500)) {
+        return { ok: false, status: data.status };
+      }
+      // fall through on unexpected response
+    }
+  }
 
   const infoKey = `albums/${albumId}/info.json`;
   const infoObj = await env.BUCKET.get(infoKey);
   if (!infoObj) {
-    const res = { ok: false, status: 404 };
-    albumInfoCache.set(albumId, res, 7 * 24 * 60 * 60 * 1000); // cache 404 briefly
-    return res;
+    return { ok: false, status: 404 };
   }
 
   let info;
   try {
     info = await infoObj.json();
   } catch {
-    const res = { ok: false, status: 500 };
-    // don't cache parse errors for too long
-    albumInfoCache.set(albumId, res, 60 * 1000);
-    return res;
+    return { ok: false, status: 500 };
   }
 
   const secrets = extractSecrets(info);
-  const res = { ok: true, info, secrets };
-  albumInfoCache.set(albumId, res);
-  return res;
+  return { ok: true, info, secrets };
 }
 
 /**

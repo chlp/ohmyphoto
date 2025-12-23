@@ -1,6 +1,5 @@
 import { json } from '../utils/response.js';
-import { getAlbumInfoWithSecrets } from '../utils/album.js';
-import { invalidateAlbumCache } from '../utils/album.js';
+import { getAlbumInfoWithSecrets, invalidateAlbumCache } from '../utils/album.js';
 import { invalidateAlbumIndex } from '../utils/albumIndex.js';
 import { timingSafeEqual } from '../utils/crypto.js';
 import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/session.js';
@@ -371,7 +370,7 @@ export async function handleAdminRequest(request, env) {
     await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify(info, null, 2), {
       httpMetadata: { contentType: "application/json; charset=utf-8" }
     });
-    invalidateAlbumCache(albumId);
+    await invalidateAlbumCache(env, albumId);
     await invalidateAlbumIndex(env, albumId);
     // Return secret as a convenience for the UI/caller (still admin-protected).
     return ok({ albumId, title, secret });
@@ -416,8 +415,10 @@ export async function handleAdminRequest(request, env) {
         httpMetadata: { contentType: "application/json; charset=utf-8" }
       });
 
-      invalidateAlbumCache(albumId);
-      invalidateAlbumCache(newAlbumId);
+      await Promise.all([
+        invalidateAlbumCache(env, albumId),
+        invalidateAlbumCache(env, newAlbumId)
+      ]);
       await Promise.all([
         invalidateAlbumIndex(env, albumId),
         invalidateAlbumIndex(env, newAlbumId)
@@ -429,7 +430,7 @@ export async function handleAdminRequest(request, env) {
     await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify(nextInfo, null, 2), {
       httpMetadata: { contentType: "application/json; charset=utf-8" }
     });
-    invalidateAlbumCache(albumId);
+    await invalidateAlbumCache(env, albumId);
     await invalidateAlbumIndex(env, albumId);
     return ok({ albumId, title: nextTitle });
   }
@@ -440,7 +441,7 @@ export async function handleAdminRequest(request, env) {
     const albumId = decodeURIComponent(mDel[1]);
     if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
     const existed = await deleteAlbum(env, albumId);
-    invalidateAlbumCache(albumId);
+    await invalidateAlbumCache(env, albumId);
     await invalidateAlbumIndex(env, albumId);
     if (!existed) return new Response("Not found", { status: 404 });
     return ok({ deleted: true, albumId });

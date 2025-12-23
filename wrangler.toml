@@ -32,6 +32,14 @@ class_name = "AlbumIndexDO"
 tag = "v2"
 new_sqlite_classes = ["AlbumIndexDO"]
 
+[[durable_objects.bindings]]
+name = "ALBUM_INFO"
+class_name = "AlbumInfoDO"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["AlbumInfoDO"]
+
 [observability]
 enabled = true
 head_sampling_rate = 1
