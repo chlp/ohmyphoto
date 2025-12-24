@@ -117,7 +117,18 @@
       const sec = normalizeSecret(secretRaw);
       if (!id) return;
       const safePath = `/${encodeURIComponent(id)}`;
-      location.href = `${safePath}#${sec}`;
+      // If we're staying on the same album path and only changing the hash,
+      // the browser won't reload the document. We need a reload to retry with the new secret.
+      if (location.pathname === safePath) {
+        const cur = normalizeSecret((location.hash || '').replace(/^#/, ''));
+        if (cur === sec) return;
+        if (sec) location.hash = `#${sec}`;
+        else location.hash = '';
+        location.reload();
+        return;
+      }
+
+      location.href = sec ? `${safePath}#${sec}` : safePath;
     };
 
     const renderStatusCard = ({ title, message, content } = {}) => {

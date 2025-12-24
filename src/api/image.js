@@ -14,7 +14,7 @@ export async function handleImageRequest(request, env, albumId, kind, name) {
   }
 
   // Validate signature against any secret in info.json (secrets set)
-  // (secrets list is cached in-memory inside getAlbumInfoWithSecrets)
+  // (secrets list is cached persistently via Durable Object when enabled)
   const loaded = await getAlbumInfoWithSecrets(albumId, env);
   if (!loaded.ok) {
     return new Response("Forbidden", { status: 403 });

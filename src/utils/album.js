@@ -14,7 +14,7 @@ export async function invalidateAlbumCache(env, albumId) {
 }
 
 /**
- * Load album info.json and extract all secrets, with an in-memory TTL cache.
+ * Load album info.json and extract all secrets.
  * @param {string} albumId
  * @param {Object} env
  * @returns {Promise<{ok: true, info: any, secrets: string[]} | {ok: false, status: 404|500}>}
