@@ -30,6 +30,11 @@
     .albumLinks { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
     .albumLinks a { font-size: 12px; color: #175cd3; text-decoration: none; }
     .albumLinks a:hover { text-decoration: underline; }
+    .albumLinkItem { display: inline-flex; gap: 6px; align-items: center; }
+    .qrDetails { display: inline-block; }
+    .qrDetails > summary { cursor: pointer; user-select: none; font-size: 11px; color: #666; }
+    .qrDetails[open] > summary { color: #111; }
+    .qrImg { width: 120px; height: 120px; display: block; margin-top: 6px; border: 1px solid #eee; border-radius: 8px; background: #fff; }
   </style>
 </head>
 <body>
@@ -315,6 +320,9 @@
 
       for (let i = 0; i < uniq.length; i++) {
         const sec = uniq[i];
+        const wrap = document.createElement('span');
+        wrap.className = 'albumLinkItem';
+
         const a = document.createElement('a');
         // Public album URL format: /<albumId>#<secret>
         // IMPORTANT: do not encode secret here; the viewer reads it verbatim from location.hash.
@@ -323,7 +331,25 @@
         a.rel = 'noreferrer';
         a.textContent = uniq.length === 1 ? 'open' : `open ${i + 1}`;
         a.title = `/${id}#${sec}`;
-        containerEl.appendChild(a);
+        wrap.appendChild(a);
+
+        // Compact QR code (lazy-loaded) for this public URL
+        const fullUrl = `${location.origin}/${encodeURIComponent(id)}#${sec}`;
+        const d = document.createElement('details');
+        d.className = 'qrDetails';
+        const s = document.createElement('summary');
+        s.textContent = 'QR';
+        const img = document.createElement('img');
+        img.className = 'qrImg';
+        img.loading = 'lazy';
+        img.alt = `QR: ${fullUrl}`;
+        // Tiny external generator to keep admin bundle minimal
+        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(fullUrl)}`;
+        d.appendChild(s);
+        d.appendChild(img);
+        wrap.appendChild(d);
+
+        containerEl.appendChild(wrap);
       }
     }
 
