@@ -3,14 +3,30 @@ import { json } from '../utils/response.js';
 import { verifyTurnstileToken } from '../utils/turnstile.js';
 import { imageSig } from '../utils/crypto.js';
 import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.js';
-import { getAlbumIndex } from '../utils/albumIndex.js';
 import { getClientIp, readJson } from '../utils/http.js';
 import { getCookieValue, makeSetCookie } from '../utils/cookies.js';
-import { listAllKeys } from '../utils/r2.js';
+import { isValidPhotoFileName } from '../utils/validate.js';
 
 /**
  * Handle POST /api/album/<albumId>
  */
+function __ompNowMs() {
+  // Workers has performance.now(); keep a fallback for safety.
+  try {
+    // eslint-disable-next-line no-undef
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
+  } catch {}
+  return Date.now();
+}
+
+function __ompFormatServerTiming(parts) {
+  // parts: Array<[name, durMs]>
+  return parts
+    .filter(([name, dur]) => name && Number.isFinite(dur) && dur >= 0)
+    .map(([name, dur]) => `${String(name).replace(/[^a-zA-Z0-9_\\-\\.]/g, '')};dur=${dur.toFixed(1)}`)
+    .join(', ');
+}
+
 async function doFetchJsonWithTimeout(stub, url, body, timeoutMs) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort('timeout'), timeoutMs);
@@ -57,6 +73,14 @@ async function peekTurnstileSoftCount(env, ip) {
 }
 
 export async function handleAlbumRequest(request, env, albumId, ctx) {
+  const __tStart = __ompNowMs();
+  const __timings = [];
+  const __mark = (name, t0) => {
+    const dt = __ompNowMs() - t0;
+    __timings.push([name, dt]);
+    return dt;
+  };
+
   const body = await readJson(request);
   if (!body) {
     return new Response("Bad JSON", { status: 400 });
@@ -69,6 +93,7 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   let setBypassCookie = false;
   let bypassCookieHeader = null;
   if (env.TURNSTILE_SECRET_KEY) {
+    const __tTurnstile = __ompNowMs();
     const cookieEnabled = String(env.TURNSTILE_BYPASS_COOKIE || "1") !== "0";
     const cookieName = String(env.TURNSTILE_BYPASS_COOKIE_NAME || "ohmyphoto_human");
     const ttlMs = Number(env.TURNSTILE_BYPASS_COOKIE_TTL_MS) || 7 * 24 * 60 * 1000;
@@ -76,6 +101,7 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
     const secure = new URL(request.url).protocol === "https:";
 
     if (cookieEnabled) {
+      const __tCookie = __ompNowMs();
       const cookieToken = getCookieValue(request.headers.get("Cookie"), cookieName);
       if (cookieToken) {
         const ok = await verifyHumanBypassToken(cookieToken, env.TURNSTILE_SECRET_KEY, clientIp);
@@ -91,6 +117,7 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
           setBypassCookie = true;
         }
       }
+      __mark('turnstile_cookie', __tCookie);
     }
 
     // Soft Turnstile:
@@ -101,7 +128,9 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
     if (!setBypassCookie) {
       const threshold = Number(env.TURNSTILE_SOFT_THRESHOLD) || 100;
       const windowMs = Number(env.TURNSTILE_SOFT_WINDOW_MS) || 24 * 60 * 60 * 1000;
+      const __tPeek = __ompNowMs();
       const { count } = await peekTurnstileSoftCount(env, clientIp);
+      __mark('turnstile_soft_peek', __tPeek);
       const enforced = count >= threshold; // require Turnstile starting from (threshold + 1)-th "bad" request
 
       if (enforced) {
@@ -110,12 +139,14 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
         }
         const clientIP = request.headers.get('CF-Connecting-IP') || null;
         const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
+        const __tVerify = __ompNowMs();
         const turnstileResult = await verifyTurnstileToken(
           turnstileToken,
           env.TURNSTILE_SECRET_KEY,
           clientIP,
           turnstileTimeoutMs
         );
+        __mark('turnstile_verify', __tVerify);
         if (!turnstileResult.success) {
           return new Response("Bot verification failed", { status: 403 });
         }
@@ -138,7 +169,9 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
         // - no token => increment immediately
         // - token present => verify in background; increment only on failure/unverified
         if (!turnstileToken) {
+          const __tAdjust = __ompNowMs();
           await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
+          __mark('turnstile_soft_adjust', __tAdjust);
         } else if (ctx && typeof ctx.waitUntil === 'function') {
           const clientIP = request.headers.get('CF-Connecting-IP') || null;
           const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
@@ -159,35 +192,37 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
           })());
         } else {
           // No ctx.waitUntil in this environment: treat as unverified.
+          const __tAdjust = __ompNowMs();
           await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
+          __mark('turnstile_soft_adjust', __tAdjust);
         }
       }
     }
+    __mark('turnstile_total', __tTurnstile);
   }
 
   // Check if album exists and secret is valid
+  const __tSecret = __ompNowMs();
   const checkResult = await checkAlbumSecret(albumId, secret, env);
+  __mark('album_secret', __tSecret);
   if (!checkResult.success) {
     return checkResult.response;
   }
   const info = checkResult.info;
   const matchedSecret = checkResult.matchedSecret;
 
-  // LIST photos/ (cached via Durable Object when available)
-  const idx = await getAlbumIndex(env, albumId);
-  let names = null;
-  if (idx && idx.ok) {
-    names = idx.files.map((f) => f.name);
+  // NO LISTING: photo list must be provided in info.json (managed via admin)
+  const __tFiles = __ompNowMs();
+  const rawFiles = info && Array.isArray(info.files) ? info.files : null;
+  if (!rawFiles) {
+    return new Response("Album is missing files list in info.json", { status: 500 });
   }
-  if (!names) {
-    // Fallback: direct R2 list (best-effort), same behavior as before.
-    const prefix = `albums/${albumId}/photos/`;
-    const keys = await listAllKeys(env.BUCKET, prefix);
-    names = keys
-      .filter(k => k !== prefix)
-      .map(k => k.substring(prefix.length));
-  }
+  const names = rawFiles
+    .map((n) => String(n || "").trim())
+    .filter((n) => isValidPhotoFileName(n));
+  __mark('album_files_info', __tFiles);
 
+  const __tSig = __ompNowMs();
   const files = names.map(async (name) => {
     const sig = await imageSig(albumId, name, matchedSecret);
     const qs = `?s=${sig}`;
@@ -199,6 +234,7 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   });
 
   const resolvedFiles = await Promise.all(files);
+  __mark('image_sig_all', __tSig);
 
   const resp = {
     albumId,
@@ -210,6 +246,9 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
     "Cache-Control": "no-store",
     "X-Robots-Tag": "noindex, nofollow",
     "Referrer-Policy": "no-referrer",
+    "Server-Timing": __ompFormatServerTiming([...__timings, ['total', (__ompNowMs() - __tStart)]]),
+    "X-OhMyPhoto-Index": "info_json",
+    "X-OhMyPhoto-FileCount": String(Array.isArray(names) ? names.length : 0),
   };
   if (setBypassCookie && bypassCookieHeader) {
     extra["Set-Cookie"] = bypassCookieHeader;

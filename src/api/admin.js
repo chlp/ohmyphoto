@@ -1,6 +1,5 @@
 import { json } from '../utils/response.js';
 import { getAlbumInfoWithSecrets, invalidateAlbumCache } from '../utils/album.js';
-import { invalidateAlbumIndex } from '../utils/albumIndex.js';
 import { timingSafeEqual } from '../utils/crypto.js';
 import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/session.js';
 import { verifyTurnstileToken } from '../utils/turnstile.js';
@@ -80,6 +79,102 @@ async function getInfoJson(env, albumId) {
   }
 }
 
+async function putInfoJson(env, albumId, info) {
+  await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify(info, null, 2), {
+    httpMetadata: { contentType: "application/json; charset=utf-8" }
+  });
+  await invalidateAlbumCache(env, albumId);
+}
+
+function getFilesFromInfo(info) {
+  const raw = info && Array.isArray(info.files) ? info.files : [];
+  const out = [];
+  const seen = new Set();
+  for (const f of raw) {
+    const name = String(f || "").trim();
+    if (!name) continue;
+    if (!isValidPhotoFileName(name)) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  out.sort((a, b) => a.localeCompare(b));
+  return out;
+}
+
+function upsertInfoFile(info, name) {
+  const files = getFilesFromInfo(info);
+  if (!files.includes(name)) files.push(name);
+  files.sort((a, b) => a.localeCompare(b));
+  return { ...(info && typeof info === "object" ? info : {}), files };
+}
+
+function removeInfoFile(info, name) {
+  const files = getFilesFromInfo(info).filter((n) => n !== name);
+  return { ...(info && typeof info === "object" ? info : {}), files };
+}
+
+function renameInfoFile(info, from, to) {
+  const files = getFilesFromInfo(info);
+  const next = files.map((n) => (n === from ? to : n));
+  const uniq = [];
+  const seen = new Set();
+  for (const n of next) {
+    if (seen.has(n)) continue;
+    seen.add(n);
+    uniq.push(n);
+  }
+  uniq.sort((a, b) => a.localeCompare(b));
+  return { ...(info && typeof info === "object" ? info : {}), files: uniq };
+}
+
+async function listAlbumPhotoNamesFromBucket(env, albumId) {
+  const photosPrefix = `albums/${albumId}/photos/`;
+  const keys = await listAllKeys(env.BUCKET, photosPrefix);
+  return keys
+    .filter((k) => k !== photosPrefix)
+    .map((k) => k.substring(photosPrefix.length))
+    .filter((n) => isValidPhotoFileName(n))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+async function listAlbumPreviewSetFromBucket(env, albumId) {
+  const previewPrefix = `albums/${albumId}/preview/`;
+  const keys = await listAllKeys(env.BUCKET, previewPrefix);
+  return new Set(
+    keys
+      .filter((k) => k !== previewPrefix)
+      .map((k) => k.substring(previewPrefix.length))
+      .filter((n) => isValidPhotoFileName(n))
+  );
+}
+
+async function rebuildAlbumFilesList(env, albumId) {
+  const info = await getInfoJson(env, albumId);
+  if (!info) return { ok: false, status: 404, error: 'Not found' };
+
+  const prev = getFilesFromInfo(info);
+  const names = await listAlbumPhotoNamesFromBucket(env, albumId);
+  const previewSet = await listAlbumPreviewSetFromBucket(env, albumId);
+  const missingPreview = names.filter((n) => !previewSet.has(n));
+
+  const nextInfo = { ...(info && typeof info === "object" ? info : {}), files: names };
+  await putInfoJson(env, albumId, nextInfo);
+
+  const prevSet = new Set(prev);
+  const nextSet = new Set(names);
+  const added = names.filter((n) => !prevSet.has(n));
+  const removed = prev.filter((n) => !nextSet.has(n));
+  return {
+    ok: true,
+    albumId,
+    fileCount: names.length,
+    added,
+    removed,
+    missingPreviewCount: missingPreview.length
+  };
+}
+
 function normalizeSecretsToObject(secretsList) {
   const out = {};
   for (const s of secretsList) {
@@ -92,33 +187,6 @@ function normalizeSecretsToObject(secretsList) {
 async function getAlbumExists(env, albumId) {
   const existing = await env.BUCKET.get(`albums/${albumId}/info.json`);
   return !!existing;
-}
-
-async function listAlbumPhotoNames(env, albumId) {
-  const photosPrefix = `albums/${albumId}/photos/`;
-  const previewPrefix = `albums/${albumId}/preview/`;
-  const [photoKeys, previewKeys] = await Promise.all([
-    listAllKeys(env.BUCKET, photosPrefix),
-    listAllKeys(env.BUCKET, previewPrefix)
-  ]);
-
-  const photoNames = photoKeys
-    .filter((k) => k !== photosPrefix)
-    .map((k) => k.substring(photosPrefix.length))
-    .sort((a, b) => a.localeCompare(b));
-
-  const previewSet = new Set(
-    previewKeys
-      .filter((k) => k !== previewPrefix)
-      .map((k) => k.substring(previewPrefix.length))
-  );
-
-  return photoNames.map((name) => ({
-    name,
-    hasPreview: previewSet.has(name),
-    photoUrl: `/api/admin/album/${encodeURIComponent(albumId)}/raw/photos/${encodeURIComponent(name)}`,
-    previewUrl: `/api/admin/album/${encodeURIComponent(albumId)}/raw/preview/${encodeURIComponent(name)}`
-  }));
 }
 
 async function putJpeg(env, key, file) {
@@ -209,14 +277,73 @@ export async function handleAdminRequest(request, env) {
   const authErr = await authorizeAdmin(request, env);
   if (authErr) return authErr;
 
+  // POST /api/admin/album/<albumId>/rebuild-files
+  const mRebuild = path.match(/^\/api\/admin\/album\/([^/]+)\/rebuild-files$/);
+  if (mRebuild && request.method === "POST") {
+    const albumId = decodeURIComponent(mRebuild[1]);
+    if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+    const r = await rebuildAlbumFilesList(env, albumId);
+    if (!r.ok) return new Response("Not found", { status: 404 });
+    return ok(r);
+  }
+
+  // POST /api/admin/albums/rebuild-files (all albums)
+  if (path === "/api/admin/albums/rebuild-files" && request.method === "POST") {
+    const infoKeys = await listAlbumInfoKeys(env);
+    const albumIds = infoKeys
+      .map((key) => key.replace(/^albums\//, "").replace(/\/info\.json$/, ""))
+      .filter((id) => isValidAlbumId(id))
+      .sort((a, b) => a.localeCompare(b));
+
+    const results = [];
+    let totalFiles = 0;
+    let totalMissingPreview = 0;
+    let albumsOk = 0;
+    let albumsErr = 0;
+
+    for (const albumId of albumIds) {
+      try {
+        const r = await rebuildAlbumFilesList(env, albumId);
+        if (r && r.ok) {
+          albumsOk += 1;
+          totalFiles += Number(r.fileCount) || 0;
+          totalMissingPreview += Number(r.missingPreviewCount) || 0;
+          results.push(r);
+        } else {
+          albumsErr += 1;
+          results.push({ ok: false, albumId, status: r?.status || 500 });
+        }
+      } catch (e) {
+        albumsErr += 1;
+        results.push({ ok: false, albumId, status: 500, error: 'rebuild_failed' });
+      }
+    }
+
+    return ok({
+      ok: true,
+      albumCount: albumIds.length,
+      albumsOk,
+      albumsErr,
+      totalFiles,
+      totalMissingPreview,
+      results
+    });
+  }
+
   // GET /api/admin/album/<albumId>/files
   const mFiles = path.match(/^\/api\/admin\/album\/([^/]+)\/files$/);
   if (mFiles && request.method === "GET") {
     const albumId = decodeURIComponent(mFiles[1]);
     if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
-    const exists = await getAlbumExists(env, albumId);
-    if (!exists) return new Response("Not found", { status: 404 });
-    const files = await listAlbumPhotoNames(env, albumId);
+    const info = await getInfoJson(env, albumId);
+    if (!info) return new Response("Not found", { status: 404 });
+    const names = getFilesFromInfo(info);
+    const files = names.map((name) => ({
+      name,
+      hasPreview: true,
+      photoUrl: `/api/admin/album/${encodeURIComponent(albumId)}/raw/photos/${encodeURIComponent(name)}`,
+      previewUrl: `/api/admin/album/${encodeURIComponent(albumId)}/raw/preview/${encodeURIComponent(name)}`
+    }));
     return ok({ albumId, files });
   }
 
@@ -282,7 +409,10 @@ export async function handleAdminRequest(request, env) {
       putJpeg(env, previewKey, preview)
     ]);
 
-    await invalidateAlbumIndex(env, albumId);
+    const info = await getInfoJson(env, albumId);
+    if (!info) return json({ error: "Missing info.json" }, 500);
+    const nextInfo = upsertInfoFile(info, name);
+    await putInfoJson(env, albumId, nextInfo);
     return ok({ uploaded: true, albumId, name });
   }
 
@@ -305,7 +435,13 @@ export async function handleAdminRequest(request, env) {
       const [p0, p1] = await Promise.all([env.BUCKET.get(photoKey), env.BUCKET.get(previewKey)]);
       if (!p0 && !p1) return new Response("Not found", { status: 404 });
       await env.BUCKET.delete([photoKey, previewKey]);
-      await invalidateAlbumIndex(env, albumId);
+      const info = await getInfoJson(env, albumId);
+      if (info) {
+        const nextInfo = removeInfoFile(info, name);
+        await putInfoJson(env, albumId, nextInfo);
+      } else {
+        await invalidateAlbumCache(env, albumId);
+      }
       return ok({ deleted: true, albumId, name });
     }
 
@@ -331,7 +467,13 @@ export async function handleAdminRequest(request, env) {
     ]);
 
     await env.BUCKET.delete([photoKey, previewKey]);
-    await invalidateAlbumIndex(env, albumId);
+    const info = await getInfoJson(env, albumId);
+    if (info) {
+      const nextInfo = renameInfoFile(info, name, newName);
+      await putInfoJson(env, albumId, nextInfo);
+    } else {
+      await invalidateAlbumCache(env, albumId);
+    }
     return ok({ renamed: true, albumId, from: name, to: newName });
   }
 
@@ -366,12 +508,8 @@ export async function handleAdminRequest(request, env) {
     if (existing) return conflict("Album already exists");
 
     const secret = generateAlbumSecret32();
-    const info = { title, secrets: { [secret]: {} } };
-    await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify(info, null, 2), {
-      httpMetadata: { contentType: "application/json; charset=utf-8" }
-    });
-    await invalidateAlbumCache(env, albumId);
-    await invalidateAlbumIndex(env, albumId);
+    const info = { title, secrets: { [secret]: {} }, files: [] };
+    await putInfoJson(env, albumId, info);
     // Return secret as a convenience for the UI/caller (still admin-protected).
     return ok({ albumId, title, secret });
   }
@@ -419,19 +557,11 @@ export async function handleAdminRequest(request, env) {
         invalidateAlbumCache(env, albumId),
         invalidateAlbumCache(env, newAlbumId)
       ]);
-      await Promise.all([
-        invalidateAlbumIndex(env, albumId),
-        invalidateAlbumIndex(env, newAlbumId)
-      ]);
       return ok({ albumId: newAlbumId, title: nextTitle, renamedFrom: albumId });
     }
 
     // update in place
-    await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify(nextInfo, null, 2), {
-      httpMetadata: { contentType: "application/json; charset=utf-8" }
-    });
-    await invalidateAlbumCache(env, albumId);
-    await invalidateAlbumIndex(env, albumId);
+    await putInfoJson(env, albumId, nextInfo);
     return ok({ albumId, title: nextTitle });
   }
 
@@ -442,7 +572,6 @@ export async function handleAdminRequest(request, env) {
     if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
     const existed = await deleteAlbum(env, albumId);
     await invalidateAlbumCache(env, albumId);
-    await invalidateAlbumIndex(env, albumId);
     if (!existed) return new Response("Not found", { status: 404 });
     return ok({ deleted: true, albumId });
   }

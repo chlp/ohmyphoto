@@ -33,7 +33,14 @@ export async function getAlbumInfoWithSecrets(albumId, env) {
     if (r && r.ok) {
       const data = await r.json().catch(() => null);
       if (data && data.ok === true && data.info) {
-        return { ok: true, info: data.info, secrets: Array.isArray(data.secrets) ? data.secrets : extractSecrets(data.info) };
+        return {
+          ok: true,
+          info: data.info,
+          secrets: Array.isArray(data.secrets) ? data.secrets : extractSecrets(data.info),
+          // Debug/observability hints (non-breaking for existing callers)
+          cached: Boolean(data.cached),
+          fetchedAtMs: Number(data.fetchedAtMs) || 0
+        };
       }
       if (data && data.ok === false && (data.status === 404 || data.status === 500)) {
         return { ok: false, status: data.status };
@@ -56,7 +63,7 @@ export async function getAlbumInfoWithSecrets(albumId, env) {
   }
 
   const secrets = extractSecrets(info);
-  return { ok: true, info, secrets };
+  return { ok: true, info, secrets, cached: false, fetchedAtMs: 0 };
 }
 
 /**

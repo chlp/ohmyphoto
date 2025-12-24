@@ -12,12 +12,18 @@ export function normalizeJpgName(input) {
   if (!name) return "";
   // Drop any path components (defense-in-depth)
   name = name.replace(/^.*[\\/]/, "");
-  // Ensure .jpg extension
-  if (!/\.jpe?g$/i.test(name)) {
-    name = name.replace(/\.[^.]+$/, ""); // strip one extension if present
-    name = `${name}.jpg`;
+  // Ensure jpeg extension (.jpg or .jpeg). Keep existing .jpg/.jpeg to match R2 keys.
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".jpg")) {
+    name = name.slice(0, -4) + ".jpg";
+  } else if (lower.endsWith(".jpeg")) {
+    name = name.slice(0, -5) + ".jpeg";
+  } else if (/\.[^.]+$/.test(name)) {
+    // Replace any other extension with .jpg
+    name = name.replace(/\.[^.]+$/, ".jpg");
   } else {
-    name = name.replace(/\.jpeg$/i, ".jpg");
+    // No extension -> default to .jpg
+    name = `${name}.jpg`;
   }
   return name;
 }
@@ -30,7 +36,7 @@ export function isValidPhotoFileName(name) {
   if (n.startsWith(".")) return false;
   // predictable + URL-safe-ish (space allowed for convenience)
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._ -]*$/.test(n)) return false;
-  if (!/\.jpg$/i.test(n)) return false;
+  if (!/\.jpe?g$/i.test(n)) return false;
   return true;
 }
 

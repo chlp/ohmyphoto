@@ -60,7 +60,10 @@
   <div class="card" id="albumsCard">
     <div class="row" style="justify-content: space-between;">
       <h2 style="margin:0">Albums</h2>
-      <button class="ghost" id="refreshBtn">Refresh</button>
+      <div class="row">
+        <button class="ghost" id="rebuildAllFilesBtn" title="Rebuild info.json.files for ALL albums by listing bucket (may take time)">Rebuild files (all)</button>
+        <button class="ghost" id="refreshBtn">Refresh</button>
+      </div>
     </div>
     <div id="status" class="muted small"></div>
     <div style="overflow:auto;">
@@ -89,6 +92,7 @@
       <div class="row">
         <button class="ghost" id="backToAlbumsBtn">Back</button>
         <button class="ghost" id="refreshFilesBtn">Refresh files</button>
+        <button class="ghost" id="rebuildFilesBtn" title="Rebuild info.json.files by listing bucket (photos/ + preview/)">Rebuild files</button>
       </div>
     </div>
 
@@ -455,6 +459,45 @@
       }
     }
 
+    async function rebuildFiles() {
+      if (!currentEditAlbumId) return;
+      const btn = $('rebuildFilesBtn');
+      if (btn) btn.disabled = true;
+      try {
+        filesStatusEl.textContent = 'Rebuilding files (listing bucket)...';
+        const resp = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/rebuild-files`, { method: 'POST' });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data || data.ok !== true) {
+          filesStatusEl.textContent = `Rebuild error: ${resp.status}`;
+          return;
+        }
+        const added = Array.isArray(data.added) ? data.added.length : 0;
+        const removed = Array.isArray(data.removed) ? data.removed.length : 0;
+        filesStatusEl.textContent = `Rebuilt. files=${data.fileCount || 0}, +${added}/-${removed}, missingPreview=${data.missingPreviewCount || 0}`;
+        await refreshFiles().catch(() => {});
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function rebuildAllFiles() {
+      const btn = $('rebuildAllFilesBtn');
+      if (btn) btn.disabled = true;
+      try {
+        statusEl.textContent = 'Rebuilding files for all albums (listing bucket)...';
+        const resp = await api('/api/admin/albums/rebuild-files', { method: 'POST' });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data || data.ok !== true) {
+          statusEl.textContent = `Rebuild-all error: ${resp.status}`;
+          return;
+        }
+        statusEl.textContent = `Rebuilt all. albums=${data.albumCount || 0}, ok=${data.albumsOk || 0}, err=${data.albumsErr || 0}, totalFiles=${data.totalFiles || 0}, missingPreview=${data.totalMissingPreview || 0}`;
+        await refresh().catch(() => {});
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
     async function uploadSelected() {
       if (!currentEditAlbumId) return;
       const list = Array.from(uploadInputEl.files || []);
@@ -620,8 +663,10 @@
     }
 
     $('refreshBtn').onclick = refresh;
+    $('rebuildAllFilesBtn').onclick = () => rebuildAllFiles().catch(() => {});
     $('backToAlbumsBtn').onclick = () => hideEditor();
     $('refreshFilesBtn').onclick = () => refreshFiles().catch(() => {});
+    $('rebuildFilesBtn').onclick = () => rebuildFiles().catch(() => {});
     $('uploadBtn').onclick = () => uploadSelected().catch(() => {});
 
     $('createBtn').onclick = async () => {

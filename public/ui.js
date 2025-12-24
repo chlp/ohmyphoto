@@ -274,6 +274,9 @@
           status: resp.status,
           ok: resp.ok,
           dtMs: Number((__ompNow() - t0).toFixed(1)),
+          serverTiming: resp.headers.get('Server-Timing') || '',
+          ompIndex: resp.headers.get('X-OhMyPhoto-Index') || '',
+          ompFileCount: resp.headers.get('X-OhMyPhoto-FileCount') || '',
         });
         return resp;
       } finally {
