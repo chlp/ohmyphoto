@@ -28,25 +28,27 @@ function __ompFormatServerTiming(parts) {
 }
 
 async function doFetchJsonWithTimeout(stub, url, body, timeoutMs) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort('timeout'), timeoutMs);
-  try {
-    return await stub.fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(t);
-  }
+  // NOTE: Durable Object `stub.fetch()` does not reliably support AbortController.
+  // Use Promise.race() to cap time spent awaiting the DO response (fail-open on timeout).
+  const ms = Number(timeoutMs) || 0;
+  const p = stub.fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!(ms > 0)) return await p;
+  return await Promise.race([
+    p,
+    new Promise((resolve) => setTimeout(() => resolve(null), ms))
+  ]);
 }
 
 async function adjustTurnstileSoftCounter(env, ip, delta, windowMs) {
   if (!env || !env.RATE_LIMITER) return;
-  const timeoutMs = Number(env.TURNSTILE_SOFT_DO_TIMEOUT_MS) || 300;
+  const timeoutMs =
+    Number(env.TURNSTILE_SOFT_ADJUST_TIMEOUT_MS) ||
+    Number(env.TURNSTILE_SOFT_DO_TIMEOUT_MS) ||
+    80;
   const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(`turnstile_soft:${ip}`));
   await doFetchJsonWithTimeout(
     stub,
@@ -58,7 +60,10 @@ async function adjustTurnstileSoftCounter(env, ip, delta, windowMs) {
 
 async function peekTurnstileSoftCount(env, ip) {
   if (!env || !env.RATE_LIMITER) return { count: 0, resetAtMs: 0 }; // fail-open
-  const timeoutMs = Number(env.TURNSTILE_SOFT_DO_TIMEOUT_MS) || 300;
+  const timeoutMs =
+    Number(env.TURNSTILE_SOFT_PEEK_TIMEOUT_MS) ||
+    Number(env.TURNSTILE_SOFT_DO_TIMEOUT_MS) ||
+    80;
   const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(`turnstile_soft:${ip}`));
   const r = await doFetchJsonWithTimeout(
     stub,
@@ -169,9 +174,13 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
         // - no token => increment immediately
         // - token present => verify in background; increment only on failure/unverified
         if (!turnstileToken) {
-          const __tAdjust = __ompNowMs();
-          await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
-          __mark('turnstile_soft_adjust', __tAdjust);
+          // Best-effort: never block the album response on Durable Object round-trips.
+          if (ctx && typeof ctx.waitUntil === 'function') {
+            ctx.waitUntil(adjustTurnstileSoftCounter(env, clientIp, +1, windowMs));
+          } else {
+            // No ctx.waitUntil in this environment: fire-and-forget.
+            adjustTurnstileSoftCounter(env, clientIp, +1, windowMs).catch(() => null);
+          }
         } else if (ctx && typeof ctx.waitUntil === 'function') {
           const clientIP = request.headers.get('CF-Connecting-IP') || null;
           const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
