@@ -1,30 +1,123 @@
 <!-- GENERATED FILE: edit `src/client/index.template.html` and run `node scripts/build-assets.mjs` -->
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mary Rytikova</title>
+
+  <!-- Meta Description -->
+  <meta name="description"
+    content="Mary Rytikova - Professional photographer from Täby, Sweden. Specializing in authentic portraits, events, and commercial photography. Capturing moments that tell stories and evoke emotions.">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://plushka.se/">
+  <meta property="og:title" content="Mary Rytikova - Professional Photography">
+  <meta property="og:description"
+    content="Mary Rytikova - Professional photographer from Täby, Sweden. Specializing in authentic portraits, events, and commercial photography. Capturing moments that tell stories and evoke emotions.">
+  <meta property="og:image" content="https://plushka.se/photos/mary-rytikova-photo.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="Mary Rytikova Photography">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://plushka.se/">
+  <meta property="twitter:title" content="Mary Rytikova - Professional Photography">
+  <meta property="twitter:description"
+    content="Mary Rytikova - Professional photographer from Täby, Sweden. Specializing in authentic portraits, events, and commercial photography. Capturing moments that tell stories and evoke emotions.">
+  <meta property="twitter:image" content="https://plushka.se/photos/mary-rytikova-photo.jpg">
+
+  <!-- Additional Meta Tags -->
+  <meta name="author" content="Mary Rytikova">
+  <meta name="keywords"
+    content="photography, portrait photography, event photography, commercial photography, Täby, Sweden, Mary Rytikova, professional photographer">
+  <meta name="robots" content="index, follow">
+
+  <!-- Favicon -->
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
-  <title>OhMyPhoto</title>
-  <meta name="robots" content="noindex,nofollow" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+
+  <!-- Web App Manifest -->
+  <link rel="manifest" href="/manifest.json">
+
+  <!-- Theme Color -->
+  <meta name="theme-color" content="#2c3e50">
+
+  <!-- Styles from plushka.se -->
+  <link rel="stylesheet" href="https://plushka.se/styles.css?v=7b21f3c4">
+
+  <!-- Keep Turnstile -->
   <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
+
 <body>
-  <h1 id="title">OhMyPhoto</h1>
-  <div id="status"></div>
+  <header class="header">
+    <div class="header-container">
+      <!-- Do not use hash navigation (we use #secret) -->
+      <a id="logoLink" href="#" class="logo" aria-label="Home"><span id="title">OhMyPhoto</span></a>
+      <h2 class="header-page-title"></h2>
+      <nav>
+        <ul class="nav-menu">
+          <li><a href="https://plushka.se" target="_blank" rel="noreferrer">Mary Rytikova Photography</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div class="container">
+      <div id="page-content">
+        <div id="status" style="padding:16px 0;"></div>
+        <div id="grid" class="gallery-grid"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-content">
+      <div class="newsletter-section" style="display: none;">
+        <h3 class="newsletter-title">Get notified with new materials</h3>
+        <form class="newsletter-form">
+          <input type="email" class="newsletter-input" placeholder="Email Address" required>
+          <button type="submit" class="newsletter-button">SUBSCRIBE</button>
+        </form>
+      </div>
+
+      <div class="contact-info">
+        <p>Contact: <a href="mailto:hello@plushka.se">hello@plushka.se</a></p>
+      </div>
+    </div>
+  </footer>
+
   <!-- Turnstile containers:
        - Invisible/offscreen is used first (no UI).
        - Modal is shown only if invisible execution can't get a token (likely needs interaction). -->
   <div id="turnstile-offscreen" style="position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;">
     <div id="turnstile-widget-invisible"></div>
   </div>
-  <div id="turnstile-modal" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:9999;">
+  <div id="turnstile-modal"
+    style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:9999;">
     <div style="background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px;max-width:360px;width:calc(100% - 32px);">
       <div id="turnstile-widget-visible" style="min-height:72px;"></div>
     </div>
   </div>
-  <div id="grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
+
+  <div id="lightbox" class="lightbox">
+    <span class="lightbox-close" onclick="closeLightbox()">&times;</span>
+    <div class="lightbox-content">
+      <img id="lightbox-img" src="" alt="Lightbox Image">
+    </div>
+    <div class="lightbox-nav lightbox-prev" onclick="previousImage(event)">&#10094;</div>
+    <div class="lightbox-nav lightbox-next" onclick="nextImage(event)">&#10095;</div>
+  </div>
 
   <script>
     function getAlbumIdFromPath() {
@@ -36,15 +129,69 @@
     // Cloudflare Turnstile site key (injected by build step)
     const TURNSTILE_SITE_KEY = '__TURNSTILE_SITE_KEY__';
 
+    // Lightbox state
+    let __lightboxIndex = -1;
+    let __lightboxItems = []; // { name, fullSrc }
+
+    function openLightboxByIndex(idx) {
+      if (!Array.isArray(__lightboxItems) || __lightboxItems.length === 0) return;
+      const i = Number(idx);
+      if (!Number.isFinite(i) || i < 0 || i >= __lightboxItems.length) return;
+      __lightboxIndex = i;
+      const lb = document.getElementById('lightbox');
+      const img = document.getElementById('lightbox-img');
+      if (!lb || !img) return;
+      img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
+      lb.style.display = 'block';
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeLightbox() {
+      const lb = document.getElementById('lightbox');
+      if (lb) lb.style.display = 'none';
+      document.body.style.overflow = 'auto';
+      __lightboxIndex = -1;
+      const img = document.getElementById('lightbox-img');
+      if (img) img.src = '';
+    }
+
+    function previousImage(e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      if (!__lightboxItems.length) return;
+      __lightboxIndex = (__lightboxIndex - 1 + __lightboxItems.length) % __lightboxItems.length;
+      const img = document.getElementById('lightbox-img');
+      if (img) img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
+    }
+
+    function nextImage(e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      if (!__lightboxItems.length) return;
+      __lightboxIndex = (__lightboxIndex + 1) % __lightboxItems.length;
+      const img = document.getElementById('lightbox-img');
+      if (img) img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
+    }
+
+    // Expose for onclick handlers in HTML
+    window.closeLightbox = closeLightbox;
+    window.previousImage = previousImage;
+    window.nextImage = nextImage;
+
     async function main() {
       const albumId = getAlbumIdFromPath();
       const secret = (location.hash || '').replace(/^#/, '');
 
+      const logoLinkEl = document.getElementById('logoLink');
+      const titleEl = document.getElementById('title');
       const statusEl = document.getElementById('status');
       const gridEl = document.getElementById('grid');
-      const titleEl = document.getElementById('title');
 
-      const setStatus = (s) => { statusEl.textContent = s; };
+      const setStatus = (s) => { if (statusEl) statusEl.textContent = String(s || ''); };
+
+      // Link to the current page including secret (hash), so user can copy/share it.
+      if (logoLinkEl) {
+        const selfHref = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+        logoLinkEl.setAttribute('href', selfHref || '#');
+      }
 
       if (!albumId) {
         setStatus('No albumId in URL. Expected /<albumId>#<secret>');
@@ -58,20 +205,16 @@
       setStatus('Loading...');
 
       async function fetchAlbumOnce(turnstileToken) {
-        setStatus('Fetching album...');
         const controller = new AbortController();
         const timeoutMs = 15000;
         const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
         try {
-          const resp = await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
+          return await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ secret, turnstileToken: String(turnstileToken || '') }),
             signal: controller.signal
           });
-          return resp;
         } finally {
           clearTimeout(timeout);
         }
@@ -102,7 +245,7 @@
               if (resolved) return;
               resolved = true;
               resolve('');
-            }, 2000); // if we can't get a token quickly, likely needs interaction
+            }, 2000);
 
             const widgetId = turnstile.render('#turnstile-widget-invisible', {
               sitekey: TURNSTILE_SITE_KEY,
@@ -128,7 +271,7 @@
           });
           if (invisibleToken) return invisibleToken;
 
-          // 2) Fall back to interactive modal if invisible couldn't get a token
+          // 2) Fall back to interactive modal
           if (modal) modal.style.display = 'flex';
           const visibleToken = await new Promise((resolve) => {
             let resolved = false;
@@ -155,12 +298,11 @@
               size: 'compact',
             });
 
-            // For visible widget, user interaction may be required; no execute() call needed.
             try { turnstile.reset(widgetId); } catch {}
           });
           if (modal) modal.style.display = 'none';
           return visibleToken || '';
-        } catch (err) {
+        } catch {
           const modal = document.getElementById('turnstile-modal');
           if (modal) modal.style.display = 'none';
           return '';
@@ -188,51 +330,66 @@
       }
 
       const data = await resp.json();
+      const files = Array.isArray(data.files) ? data.files : [];
+
       const baseTitle = 'OhMyPhoto';
       const albumTitle = data.title || baseTitle;
 
-      titleEl.textContent = albumTitle;
+      if (titleEl) titleEl.textContent = albumTitle;
       document.title = albumTitle === baseTitle ? baseTitle : `${albumTitle} | ${baseTitle}`;
+      setStatus(files.length ? '' : 'This is the correct link, but the photos haven’t been uploaded here yet.');
 
-      if (data.files.length === 0) {
-        setStatus('This is the correct link, but the photos haven’t been uploaded here yet.');
-      } else {
-        setStatus('');
-      }
-
-      // Render previews if worker returns previewUrl
+      if (!gridEl) return;
       gridEl.innerHTML = '';
-      for (const f of data.files) {
-        const wrap = document.createElement('div');
-        wrap.style.border = '1px solid #ddd';
-        wrap.style.padding = '8px';
+
+      __lightboxItems = files.map((f) => ({
+        name: String(f.name || ''),
+        fullSrc: String(f.photoUrl || '')
+      }));
+
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const item = document.createElement('div');
+        item.className = 'gallery-item';
 
         const img = document.createElement('img');
         img.loading = 'lazy';
-        img.style.width = '100%';
-        img.style.height = '160px';
-        img.style.objectFit = 'cover';
-        img.src = f.previewUrl || '';
+        img.alt = 'Photography';
+        img.src = String(f.previewUrl || f.photoUrl || '');
+        img.dataset.index = String(i);
+        img.onclick = () => openLightboxByIndex(i);
 
-        const a = document.createElement('a');
-        a.textContent = f.name;
-        a.href = f.photoUrl || '#';
-        a.target = '_blank';
-        a.rel = 'noreferrer';
-
-        wrap.appendChild(img);
-        wrap.appendChild(document.createElement('div')).appendChild(a);
-        gridEl.appendChild(wrap);
+        item.appendChild(img);
+        gridEl.appendChild(item);
       }
+
+      // Lightbox close behavior
+      const lb = document.getElementById('lightbox');
+      if (lb) {
+        lb.onclick = (e) => {
+          // close when clicking overlay/background (not when clicking image/nav)
+          if (e && e.target === lb) closeLightbox();
+        };
+      }
+
+      document.addEventListener('keydown', (e) => {
+        const lb = document.getElementById('lightbox');
+        if (!lb || lb.style.display !== 'block') return;
+        if (e.key === 'Escape') closeLightbox();
+        else if (e.key === 'ArrowLeft') previousImage(e);
+        else if (e.key === 'ArrowRight') nextImage(e);
+      });
     }
 
-    main().catch(err => {
+    main().catch((err) => {
       const msg = (err && err.name === 'AbortError')
         ? 'Request timed out. Try again.'
         : String(err && (err.stack || err.message || err));
-      document.getElementById('status').textContent = msg;
+      const el = document.getElementById('status');
+      if (el) el.textContent = msg;
     });
   </script>
 </body>
+
 </html>
 
