@@ -4,6 +4,19 @@
   // Config injected by HTML template (`src/client/index.template.html`)
   const TURNSTILE_SITE_KEY = String(window.__turnstileSiteKey || '');
 
+  // Simple perf logger (relative to earliest point we can anchor to)
+  const __ompStart = (typeof window.__ohmyphotoStart === 'number' && Number.isFinite(window.__ohmyphotoStart))
+    ? window.__ohmyphotoStart
+    : performance.now();
+  const __ompNow = () => performance.now();
+  function __ompLog(label, extra) {
+    const delta = (__ompNow() - __ompStart).toFixed(1);
+    if (extra !== undefined) console.log(`[ohmyphoto +${delta}ms] ${label}`, extra);
+    else console.log(`[ohmyphoto +${delta}ms] ${label}`);
+  }
+
+  __ompLog('ui.js executed', { readyState: document.readyState });
+
   function getAlbumIdFromPath() {
     // expect /<albumId>
     const parts = location.pathname.split('/').filter(Boolean);
@@ -72,6 +85,8 @@
   async function main() {
     const albumId = getAlbumIdFromPath();
     const secret = (location.hash || '').replace(/^#/, '');
+
+    __ompLog('main() start', { albumId, hasSecret: Boolean(secret) });
 
     const logoLinkEl = document.getElementById('logoLink');
     const titleEl = document.getElementById('title');
@@ -237,16 +252,30 @@
     setStatusText('Loading...');
 
     async function fetchAlbumOnce(turnstileToken) {
+      const url = `/api/album/${encodeURIComponent(albumId)}`;
+      const t0 = __ompNow();
+      __ompLog('album request -> send', {
+        url,
+        albumId,
+        hasTurnstileToken: Boolean(turnstileToken),
+      });
       const controller = new AbortController();
       const timeoutMs = 15000;
       const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
       try {
-        return await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
+        const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ secret, turnstileToken: String(turnstileToken || '') }),
           signal: controller.signal
         });
+        __ompLog('album request <- response', {
+          url,
+          status: resp.status,
+          ok: resp.ok,
+          dtMs: Number((__ompNow() - t0).toFixed(1)),
+        });
+        return resp;
       } finally {
         clearTimeout(timeout);
       }
@@ -255,6 +284,7 @@
     async function getTurnstileTokenOnce() {
       if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY === 'YOUR_TURNSTILE_SITE_KEY') return '';
       try {
+        __ompLog('turnstile: start');
         // Wait for Turnstile script to load (poll with timeout)
         await new Promise((resolve) => {
           const startedAt = Date.now();
@@ -266,16 +296,23 @@
           tick();
         });
 
-        if (typeof turnstile === 'undefined') return '';
+        if (typeof turnstile === 'undefined') {
+          __ompLog('turnstile: script not ready (timeout)');
+          return '';
+        }
+
+        __ompLog('turnstile: script ready');
 
         const modal = document.getElementById('turnstile-modal');
 
         // 1) Try invisible/offscreen first (no UI)
+        __ompLog('turnstile: invisible execute -> start');
         const invisibleToken = await new Promise((resolve) => {
           let resolved = false;
           const overallTimeout = setTimeout(() => {
             if (resolved) return;
             resolved = true;
+            __ompLog('turnstile: invisible execute -> timeout');
             resolve('');
           }, 2000);
 
@@ -285,12 +322,14 @@
               if (resolved) return;
               resolved = true;
               clearTimeout(overallTimeout);
+              __ompLog('turnstile: invisible -> passed');
               resolve(t);
             },
             'error-callback': () => {
               if (resolved) return;
               resolved = true;
               clearTimeout(overallTimeout);
+              __ompLog('turnstile: invisible -> error');
               resolve('');
             },
             size: 'invisible',
@@ -299,17 +338,19 @@
           });
 
           try { turnstile.reset(widgetId); } catch {}
-          try { turnstile.execute(widgetId); } catch { resolve(''); }
+          try { turnstile.execute(widgetId); } catch { __ompLog('turnstile: invisible execute -> exception'); resolve(''); }
         });
         if (invisibleToken) return invisibleToken;
 
         // 2) Fall back to interactive modal
+        __ompLog('turnstile: modal -> show');
         if (modal) modal.style.display = 'flex';
         const visibleToken = await new Promise((resolve) => {
           let resolved = false;
           const timeout = setTimeout(() => {
             if (resolved) return;
             resolved = true;
+            __ompLog('turnstile: modal -> timeout');
             resolve('');
           }, 20000);
 
@@ -319,12 +360,14 @@
               if (resolved) return;
               resolved = true;
               clearTimeout(timeout);
+              __ompLog('turnstile: modal -> passed');
               resolve(t);
             },
             'error-callback': () => {
               if (resolved) return;
               resolved = true;
               clearTimeout(timeout);
+              __ompLog('turnstile: modal -> error');
               resolve('');
             },
             size: 'compact',
@@ -332,11 +375,13 @@
 
           try { turnstile.reset(widgetId); } catch {}
         });
+        __ompLog('turnstile: modal -> hide');
         if (modal) modal.style.display = 'none';
         return visibleToken || '';
       } catch {
         const modal = document.getElementById('turnstile-modal');
         if (modal) modal.style.display = 'none';
+        __ompLog('turnstile: exception');
         return '';
       }
     }
@@ -435,8 +480,15 @@
     });
   };
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
-  else run();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      __ompLog('DOMContentLoaded -> run()');
+      run();
+    });
+  } else {
+    __ompLog('readyState != loading -> run()');
+    run();
+  }
 })();
 
 

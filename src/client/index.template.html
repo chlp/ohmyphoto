@@ -1,4 +1,3 @@
-<!-- GENERATED FILE: edit `src/client/index.template.html` and run `node scripts/build-assets.mjs` -->
 <!DOCTYPE html>
 <html lang="en">
 
@@ -52,6 +51,22 @@
 
   <!-- Styles from plushka.se -->
   <link rel="stylesheet" href="https://plushka.se/styles.css?v=7b21f3c4">
+
+  <!-- Perf/diagnostics: page start -->
+  <script>
+    // Basic timeline anchor available to ui.js
+    window.__ohmyphotoStart = performance.now();
+    console.log(`[ohmyphoto +0.0ms] page script start`, {
+      href: location.href,
+      timeOrigin: performance.timeOrigin
+    });
+    addEventListener('DOMContentLoaded', () => {
+      console.log(`[ohmyphoto +${(performance.now() - window.__ohmyphotoStart).toFixed(1)}ms] DOMContentLoaded`);
+    }, { once: true });
+    addEventListener('load', () => {
+      console.log(`[ohmyphoto +${(performance.now() - window.__ohmyphotoStart).toFixed(1)}ms] window.load`);
+    }, { once: true });
+  </script>
 
   <style>
     /* Local additions for empty-album status */
