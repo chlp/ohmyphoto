@@ -53,6 +53,27 @@
   <!-- Styles from plushka.se -->
   <link rel="stylesheet" href="https://plushka.se/styles.css?v=7b21f3c4">
 
+  <style>
+    /* Local additions for empty-album status */
+    #status { width: 100%; }
+    .status-card {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 18px 20px;
+      border: 1px solid rgba(0, 0, 0, 0.10);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.85);
+    }
+    .status-card h1 {
+      margin: 0 0 6px;
+      font-size: 32px;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+    .status-card p { margin: 10px 0; }
+    .status-muted { opacity: 0.75; font-size: 14px; }
+  </style>
+
   <!-- Keep Turnstile -->
   <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
@@ -120,275 +141,10 @@
   </div>
 
   <script>
-    function getAlbumIdFromPath() {
-      // expect /<albumId>
-      const parts = location.pathname.split('/').filter(Boolean);
-      return parts[0] || '';
-    }
-
-    // Cloudflare Turnstile site key (injected by build step)
-    const TURNSTILE_SITE_KEY = '__TURNSTILE_SITE_KEY__';
-
-    // Lightbox state
-    let __lightboxIndex = -1;
-    let __lightboxItems = []; // { name, fullSrc }
-
-    function openLightboxByIndex(idx) {
-      if (!Array.isArray(__lightboxItems) || __lightboxItems.length === 0) return;
-      const i = Number(idx);
-      if (!Number.isFinite(i) || i < 0 || i >= __lightboxItems.length) return;
-      __lightboxIndex = i;
-      const lb = document.getElementById('lightbox');
-      const img = document.getElementById('lightbox-img');
-      if (!lb || !img) return;
-      img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
-      lb.style.display = 'block';
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeLightbox() {
-      const lb = document.getElementById('lightbox');
-      if (lb) lb.style.display = 'none';
-      document.body.style.overflow = 'auto';
-      __lightboxIndex = -1;
-      const img = document.getElementById('lightbox-img');
-      if (img) img.src = '';
-    }
-
-    function previousImage(e) {
-      if (e && e.stopPropagation) e.stopPropagation();
-      if (!__lightboxItems.length) return;
-      __lightboxIndex = (__lightboxIndex - 1 + __lightboxItems.length) % __lightboxItems.length;
-      const img = document.getElementById('lightbox-img');
-      if (img) img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
-    }
-
-    function nextImage(e) {
-      if (e && e.stopPropagation) e.stopPropagation();
-      if (!__lightboxItems.length) return;
-      __lightboxIndex = (__lightboxIndex + 1) % __lightboxItems.length;
-      const img = document.getElementById('lightbox-img');
-      if (img) img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
-    }
-
-    // Expose for onclick handlers in HTML
-    window.closeLightbox = closeLightbox;
-    window.previousImage = previousImage;
-    window.nextImage = nextImage;
-
-    async function main() {
-      const albumId = getAlbumIdFromPath();
-      const secret = (location.hash || '').replace(/^#/, '');
-
-      const logoLinkEl = document.getElementById('logoLink');
-      const titleEl = document.getElementById('title');
-      const statusEl = document.getElementById('status');
-      const gridEl = document.getElementById('grid');
-
-      const setStatus = (s) => { if (statusEl) statusEl.textContent = String(s || ''); };
-
-      // Link to the current page including secret (hash), so user can copy/share it.
-      if (logoLinkEl) {
-        const selfHref = `${location.pathname}${location.search || ''}${location.hash || ''}`;
-        logoLinkEl.setAttribute('href', selfHref || '#');
-      }
-
-      if (!albumId) {
-        setStatus('No albumId in URL. Expected /<albumId>#<secret>');
-        return;
-      }
-      if (!secret) {
-        setStatus('No secret in URL hash. Expected /<albumId>#<secret>');
-        return;
-      }
-
-      setStatus('Loading...');
-
-      async function fetchAlbumOnce(turnstileToken) {
-        const controller = new AbortController();
-        const timeoutMs = 15000;
-        const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
-        try {
-          return await fetch(`/api/album/${encodeURIComponent(albumId)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ secret, turnstileToken: String(turnstileToken || '') }),
-            signal: controller.signal
-          });
-        } finally {
-          clearTimeout(timeout);
-        }
-      }
-
-      async function getTurnstileTokenOnce() {
-        if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY === 'YOUR_TURNSTILE_SITE_KEY') return '';
-        try {
-          // Wait for Turnstile script to load (poll with timeout)
-          await new Promise((resolve) => {
-            const startedAt = Date.now();
-            const tick = () => {
-              if (typeof turnstile !== 'undefined') return resolve();
-              if (Date.now() - startedAt > 3000) return resolve(); // 3s timeout
-              setTimeout(tick, 50);
-            };
-            tick();
-          });
-
-          if (typeof turnstile === 'undefined') return '';
-
-          const modal = document.getElementById('turnstile-modal');
-
-          // 1) Try invisible/offscreen first (no UI)
-          const invisibleToken = await new Promise((resolve) => {
-            let resolved = false;
-            const overallTimeout = setTimeout(() => {
-              if (resolved) return;
-              resolved = true;
-              resolve('');
-            }, 2000);
-
-            const widgetId = turnstile.render('#turnstile-widget-invisible', {
-              sitekey: TURNSTILE_SITE_KEY,
-              callback: (t) => {
-                if (resolved) return;
-                resolved = true;
-                clearTimeout(overallTimeout);
-                resolve(t);
-              },
-              'error-callback': () => {
-                if (resolved) return;
-                resolved = true;
-                clearTimeout(overallTimeout);
-                resolve('');
-              },
-              size: 'invisible',
-              execution: 'execute',
-              appearance: 'interaction-only',
-            });
-
-            try { turnstile.reset(widgetId); } catch {}
-            try { turnstile.execute(widgetId); } catch { resolve(''); }
-          });
-          if (invisibleToken) return invisibleToken;
-
-          // 2) Fall back to interactive modal
-          if (modal) modal.style.display = 'flex';
-          const visibleToken = await new Promise((resolve) => {
-            let resolved = false;
-            const timeout = setTimeout(() => {
-              if (resolved) return;
-              resolved = true;
-              resolve('');
-            }, 20000);
-
-            const widgetId = turnstile.render('#turnstile-widget-visible', {
-              sitekey: TURNSTILE_SITE_KEY,
-              callback: (t) => {
-                if (resolved) return;
-                resolved = true;
-                clearTimeout(timeout);
-                resolve(t);
-              },
-              'error-callback': () => {
-                if (resolved) return;
-                resolved = true;
-                clearTimeout(timeout);
-                resolve('');
-              },
-              size: 'compact',
-            });
-
-            try { turnstile.reset(widgetId); } catch {}
-          });
-          if (modal) modal.style.display = 'none';
-          return visibleToken || '';
-        } catch {
-          const modal = document.getElementById('turnstile-modal');
-          if (modal) modal.style.display = 'none';
-          return '';
-        }
-      }
-
-      // Fast path: try without Turnstile. If server requires it, we'll get 403 and retry once.
-      let resp = await fetchAlbumOnce('');
-      if (resp.status === 403) {
-        const token = await getTurnstileTokenOnce();
-        resp = await fetchAlbumOnce(token);
-      }
-
-      if (resp.status === 404) {
-        setStatus('Album not found (404)');
-        return;
-      }
-      if (resp.status === 403) {
-        setStatus('Forbidden (403): wrong secret / bot check failed');
-        return;
-      }
-      if (!resp.ok) {
-        setStatus(`Error: ${resp.status}`);
-        return;
-      }
-
-      const data = await resp.json();
-      const files = Array.isArray(data.files) ? data.files : [];
-
-      const baseTitle = 'OhMyPhoto';
-      const albumTitle = data.title || baseTitle;
-
-      if (titleEl) titleEl.textContent = albumTitle;
-      document.title = albumTitle === baseTitle ? baseTitle : `${albumTitle} | ${baseTitle}`;
-      setStatus(files.length ? '' : 'This is the correct link, but the photos haven’t been uploaded here yet.');
-
-      if (!gridEl) return;
-      gridEl.innerHTML = '';
-
-      __lightboxItems = files.map((f) => ({
-        name: String(f.name || ''),
-        fullSrc: String(f.photoUrl || '')
-      }));
-
-      for (let i = 0; i < files.length; i++) {
-        const f = files[i];
-        const item = document.createElement('div');
-        item.className = 'gallery-item';
-
-        const img = document.createElement('img');
-        img.loading = 'lazy';
-        img.alt = 'Photography';
-        img.src = String(f.previewUrl || f.photoUrl || '');
-        img.dataset.index = String(i);
-        img.onclick = () => openLightboxByIndex(i);
-
-        item.appendChild(img);
-        gridEl.appendChild(item);
-      }
-
-      // Lightbox close behavior
-      const lb = document.getElementById('lightbox');
-      if (lb) {
-        lb.onclick = (e) => {
-          // close when clicking overlay/background (not when clicking image/nav)
-          if (e && e.target === lb) closeLightbox();
-        };
-      }
-
-      document.addEventListener('keydown', (e) => {
-        const lb = document.getElementById('lightbox');
-        if (!lb || lb.style.display !== 'block') return;
-        if (e.key === 'Escape') closeLightbox();
-        else if (e.key === 'ArrowLeft') previousImage(e);
-        else if (e.key === 'ArrowRight') nextImage(e);
-      });
-    }
-
-    main().catch((err) => {
-      const msg = (err && err.name === 'AbortError')
-        ? 'Request timed out. Try again.'
-        : String(err && (err.stack || err.message || err));
-      const el = document.getElementById('status');
-      if (el) el.textContent = msg;
-    });
+    // Injected by build step (see scripts/build-assets.mjs)
+    window.__turnstileSiteKey = '__TURNSTILE_SITE_KEY__';
   </script>
+  <script src="/ui.js" defer></script>
 </body>
 
 </html>
