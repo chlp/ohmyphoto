@@ -24,10 +24,6 @@ class_name = "RateLimiterDO"
 tag = "v1"
 new_sqlite_classes = ["RateLimiterDO"]
 
-[[durable_objects.bindings]]
-name = "ALBUM_INDEXER"
-class_name = "AlbumIndexDO"
-
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["AlbumIndexDO"]
@@ -39,6 +35,10 @@ class_name = "AlbumInfoDO"
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["AlbumInfoDO"]
+
+[[migrations]]
+tag = "v4"
+deleted_classes = ["AlbumIndexDO"]
 
 [observability]
 enabled = true

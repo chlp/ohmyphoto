@@ -1,7 +1,6 @@
 import { route } from './router.js';
 import { enforceRateLimit } from './utils/rateLimit.js';
 export { RateLimiterDO } from './durable/rateLimiter.js';
-export { AlbumIndexDO } from './durable/albumIndex.js';
 export { AlbumInfoDO } from './durable/albumInfo.js';
 
 export default {
