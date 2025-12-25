@@ -72,6 +72,21 @@ function isValidAiSlugAlbumId(slug) {
   return true;
 }
 
+function normalizeAiTitle(raw) {
+  // take first line, strip quotes/backticks, collapse whitespace
+  const firstLine = String(raw || "").split(/\r?\n/)[0] || "";
+  let s = firstLine.trim();
+  s = s.replace(/^["'`]+/, "").replace(/["'`]+$/, "");
+  // Remove control chars
+  s = s.replace(/[\u0000-\u001F\u007F]/g, "");
+  s = s.replace(/\s+/g, " ").trim();
+  // guard against absurd output
+  if (s.length > 80) s = s.slice(0, 80).trim();
+  // avoid trailing punctuation-only titles
+  s = s.replace(/^[\s\-–—:;,.!?]+/, "").replace(/[\s\-–—:;,.!?]+$/, "").trim();
+  return s;
+}
+
 async function generateAlbumIdViaAi(env, description) {
   if (!env || !env.AI) {
     return { ok: false, status: 501, error: "Workers AI is not configured (missing AI binding)" };
@@ -139,6 +154,64 @@ async function generateAlbumIdViaAi(env, description) {
   }
 
   return { ok: false, status: 502, error: "AI returned an invalid slug" };
+}
+
+async function generateAlbumTitleViaAi(env, description) {
+  if (!env || !env.AI) {
+    return { ok: false, status: 501, error: "Workers AI is not configured (missing AI binding)" };
+  }
+
+  const desc = String(description || "").trim();
+  if (!desc) return { ok: false, status: 400, error: "Missing description" };
+  if (desc.length > 500) return { ok: false, status: 400, error: "Description too long" };
+
+  const basePrompt =
+    `${desc}\n\n` +
+    `Generate a short, human-friendly album title (2–6 words).\n` +
+    `- Use the same language as the input description.\n` +
+    `- Do NOT include a date.\n` +
+    `- Output must be a single line.\n` +
+    `- No quotes, no extra text.`;
+
+  const model = String(env.AI_ALBUM_TITLE_MODEL || "").trim()
+    || String(env.AI_ALBUM_ID_MODEL || "").trim()
+    || "@cf/meta/llama-2-7b-chat-int8";
+
+  const maxTokensRaw = Number(env.AI_ALBUM_TITLE_MAX_TOKENS);
+  const max_tokens = Number.isFinite(maxTokensRaw) && maxTokensRaw > 0 ? Math.min(96, Math.floor(maxTokensRaw)) : 24;
+  const tempRaw = Number(env.AI_ALBUM_TITLE_TEMPERATURE);
+  const temperature = Number.isFinite(tempRaw) ? Math.min(1, Math.max(0, tempRaw)) : 0.3;
+  const topPRaw = Number(env.AI_ALBUM_TITLE_TOP_P);
+  const top_p = Number.isFinite(topPRaw) ? Math.min(1, Math.max(0.1, topPRaw)) : 0.9;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const prompt = attempt === 1
+      ? basePrompt
+      : `${basePrompt}\n\nIMPORTANT: Return only the title text on one line. No punctuation-only output.`;
+
+    let out;
+    try {
+      out = await env.AI.run(model, {
+        messages: [{ role: "user", content: prompt }],
+        max_tokens,
+        temperature,
+        top_p
+      });
+    } catch (e) {
+      return { ok: false, status: 502, error: "AI generation failed" };
+    }
+
+    const raw =
+      typeof out === "string" ? out :
+        (out && typeof out.response === "string") ? out.response :
+          (out && out.result && typeof out.result.response === "string") ? out.result.response :
+            JSON.stringify(out || "");
+
+    const title = normalizeAiTitle(raw);
+    if (title) return { ok: true, title, raw: String(raw || "") };
+  }
+
+  return { ok: false, status: 502, error: "AI returned an empty title" };
 }
 
 function randomHex(bytesLen) {
@@ -378,7 +451,9 @@ export async function handleAdminRequest(request, env) {
     const description = String(body.description || body.text || body.prompt || "").trim();
     const r = await generateAlbumIdViaAi(env, description);
     if (!r.ok) return json({ error: r.error }, r.status || 500, { "Cache-Control": "no-store" });
-    return ok({ albumId: r.albumId });
+    // Best-effort title generation: albumId is the primary requirement.
+    const t = await generateAlbumTitleViaAi(env, description);
+    return ok({ albumId: r.albumId, title: t && t.ok ? t.title : "" });
   }
 
   // POST /api/admin/album/<albumId>/rebuild-files

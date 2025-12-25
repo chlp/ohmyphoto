@@ -926,6 +926,7 @@
       const btn = $('genAlbumIdBtn');
       const descEl = $('newAlbumDesc');
       const albumIdEl = $('newAlbumId');
+      const titleEl = $('newTitle');
       const desc = String(descEl && descEl.value || '').trim();
       if (!desc) {
         alert('Enter a short description first (e.g. "семья на пляже")');
@@ -947,6 +948,7 @@
         }
         const data = await r.json().catch(() => null);
         const id = data && data.albumId ? String(data.albumId) : '';
+        const title = data && data.title ? String(data.title) : '';
         if (!id) {
           if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = 'Error: empty result';
           alert('AI returned empty result');
@@ -955,6 +957,9 @@
         if (albumIdEl) {
           albumIdEl.value = id;
           try { albumIdEl.focus(); albumIdEl.select(); } catch {}
+        }
+        if (titleEl && title && !String(titleEl.value || '').trim()) {
+          titleEl.value = title;
         }
         if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = `OK: ${id}`;
       } finally {
