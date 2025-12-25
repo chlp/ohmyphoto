@@ -4,7 +4,8 @@
 
 export function isValidAlbumId(albumId) {
   // keep it simple: URL/path safe
-  return /^[a-zA-Z0-9_-]{1,64}$/.test(String(albumId || ""));
+  // Allow dots for date-prefixed ids like "2025.12.25-sunny-family-beach"
+  return /^[a-zA-Z0-9_.-]{1,64}$/.test(String(albumId || ""));
 }
 
 export function isValidAlbumSecret(secret) {

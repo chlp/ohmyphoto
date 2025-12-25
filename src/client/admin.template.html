@@ -76,6 +76,16 @@
 
   <div class="card">
     <h2>Create album</h2>
+    <div class="row" style="align-items:flex-end;">
+      <div style="flex:1;min-width:280px;">
+        <label class="small muted" for="newAlbumDesc">AI description (optional):</label>
+        <input id="newAlbumDesc" placeholder="семья на пляже" style="width:100%;" />
+      </div>
+      <div>
+        <button class="ghost" id="genAlbumIdBtn" title="Generate a short album id (slug) via Workers AI">Generate album id (AI)</button>
+      </div>
+      <div class="muted small" id="genAlbumIdStatus" style="min-width:220px;"></div>
+    </div>
     <div class="row">
       <label>Album ID:</label>
       <input id="newAlbumId" placeholder="abc" />
@@ -150,6 +160,7 @@
     const tokenEl = $('token');
     const statusEl = $('status');
     const authInfoEl = $('authInfo');
+    const genAlbumIdStatusEl = $('genAlbumIdStatus');
     const albumsCardEl = $('albumsCard');
     const editorCardEl = $('editorCard');
     const editAlbumIdEl = $('editAlbumId');
@@ -899,6 +910,46 @@
       for (const b of bytes) hex += b.toString(16).padStart(2, "0");
       secretEl.value = hex;
       try { secretEl.focus(); secretEl.select(); } catch {}
+    };
+
+    $('genAlbumIdBtn').onclick = async () => {
+      const btn = $('genAlbumIdBtn');
+      const descEl = $('newAlbumDesc');
+      const albumIdEl = $('newAlbumId');
+      const desc = String(descEl && descEl.value || '').trim();
+      if (!desc) {
+        alert('Enter a short description first (e.g. "семья на пляже")');
+        return;
+      }
+      if (btn) btn.disabled = true;
+      if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = 'Generating...';
+      try {
+        const r = await api('/api/admin/generate-album-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: desc })
+        });
+        if (!r.ok) {
+          const t = await r.text().catch(() => '');
+          if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = `Error: ${r.status}`;
+          alert(`AI generation failed: ${r.status} ${t}`);
+          return;
+        }
+        const data = await r.json().catch(() => null);
+        const id = data && data.albumId ? String(data.albumId) : '';
+        if (!id) {
+          if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = 'Error: empty result';
+          alert('AI returned empty result');
+          return;
+        }
+        if (albumIdEl) {
+          albumIdEl.value = id;
+          try { albumIdEl.focus(); albumIdEl.select(); } catch {}
+        }
+        if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = `OK: ${id}`;
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     };
 
     refresh().catch(err => {

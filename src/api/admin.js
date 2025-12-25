@@ -42,6 +42,100 @@ function ok(obj = {}) {
   return json(obj, 200, { "Cache-Control": "no-store" });
 }
 
+function formatDatePrefixUtc(d = new Date()) {
+  // YYYY.MM.DD-
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}.${mm}.${dd}-`;
+}
+
+function normalizeAiSlugToAlbumId(raw) {
+  // take first line, strip quotes, enforce lowercase + kebab-case
+  const firstLine = String(raw || "").split(/\r?\n/)[0] || "";
+  let s = firstLine.trim();
+  // drop wrapping quotes/backticks
+  s = s.replace(/^["'`]+/, "").replace(/["'`]+$/, "");
+  s = s.toLowerCase();
+  // replace invalid chars with hyphen, then collapse
+  s = s.replace(/[^a-z-]+/g, "-");
+  s = s.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  // keep within albumId length limit
+  if (s.length > 64) s = s.slice(0, 64).replace(/-+$/g, "");
+  return s;
+}
+
+function isValidAiSlugAlbumId(slug) {
+  const s = String(slug || "");
+  if (!/^[a-z-]{1,64}$/.test(s)) return false;
+  const words = s.split("-").filter(Boolean);
+  if (words.length < 3 || words.length > 4) return false;
+  // albumId validator allows underscores/digits too, but AI spec is letters+hyphens only
+  return true;
+}
+
+async function generateAlbumIdViaAi(env, description) {
+  if (!env || !env.AI) {
+    return { ok: false, status: 501, error: "Workers AI is not configured (missing AI binding)" };
+  }
+
+  const desc = String(description || "").trim();
+  if (!desc) return { ok: false, status: 400, error: "Missing description" };
+  if (desc.length > 500) return { ok: false, status: 400, error: "Description too long" };
+
+  const datePrefix = formatDatePrefixUtc(new Date());
+  const maxTotalLen = 64;
+  const maxSlugLen = Math.max(1, maxTotalLen - datePrefix.length);
+
+  const basePrompt =
+    `${desc}\n\n` +
+    `Generate a short English slug (3–4 words) in kebab-case.\n` +
+    `Output must be a single line with only lowercase letters a-z and hyphens.\n` +
+    `Include exactly 1 pleasant vivid adjective as one of the words.\n` +
+    `No extra text.`;
+
+  const model = String(env.AI_ALBUM_ID_MODEL || "").trim() || "@cf/meta/llama-3.1-8b-instruct";
+
+  // Try twice: second attempt is stricter if model misbehaves.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const prompt = attempt === 1
+      ? basePrompt
+      : `${basePrompt}\n\nIMPORTANT: Return exactly 3 or 4 words, joined by single hyphens. Include exactly 1 pleasant adjective. Do NOT include quotes, punctuation, numbers, or additional lines.`;
+
+    let out;
+    try {
+      // Chat-style models in Workers AI accept { messages: [...] }
+      out = await env.AI.run(model, {
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 32,
+        temperature: 0.3,
+        top_p: 0.9
+      });
+    } catch (e) {
+      return { ok: false, status: 502, error: "AI generation failed" };
+    }
+
+    const raw =
+      typeof out === "string" ? out :
+        (out && typeof out.response === "string") ? out.response :
+          (out && out.result && typeof out.result.response === "string") ? out.result.response :
+            JSON.stringify(out || "");
+
+    let slug = normalizeAiSlugToAlbumId(raw);
+    if (slug.length > maxSlugLen) slug = slug.slice(0, maxSlugLen).replace(/-+$/g, "");
+    if (isValidAiSlugAlbumId(slug)) {
+      // Ensure it also passes the app's albumId validation (slugs should).
+      const albumId = `${datePrefix}${slug}`;
+      if (!isValidAlbumId(albumId)) {
+        return { ok: false, status: 502, error: "AI output did not produce a valid albumId" };
+      }
+      return { ok: true, albumId, raw: String(raw || "") };
+    }
+  }
+
+  return { ok: false, status: 502, error: "AI returned an invalid slug" };
+}
+
 function randomHex(bytesLen) {
   const bytes = new Uint8Array(bytesLen);
   crypto.getRandomValues(bytes);
@@ -271,6 +365,16 @@ export async function handleAdminRequest(request, env) {
 
   const authErr = await authorizeAdmin(request, env);
   if (authErr) return authErr;
+
+  // POST /api/admin/generate-album-id (Workers AI)
+  if (path === "/api/admin/generate-album-id" && request.method === "POST") {
+    const body = await readJson(request);
+    if (!body) return badRequest("Bad JSON");
+    const description = String(body.description || body.text || body.prompt || "").trim();
+    const r = await generateAlbumIdViaAi(env, description);
+    if (!r.ok) return json({ error: r.error }, r.status || 500, { "Cache-Control": "no-store" });
+    return ok({ albumId: r.albumId });
+  }
 
   // POST /api/admin/album/<albumId>/rebuild-files
   const mRebuild = path.match(/^\/api\/admin\/album\/([^/]+)\/rebuild-files$/);
