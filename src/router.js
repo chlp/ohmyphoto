@@ -1,6 +1,7 @@
 import { handleAlbumRequest } from './api/album.js';
 import { handleImageRequest } from './api/image.js';
 import { handleAdminRequest } from './api/admin.js';
+import { notFound } from './utils/response.js';
 
 /**
  * Router for handling different routes
@@ -31,6 +32,6 @@ export async function route(request, env, ctx) {
   }
 
   // 404 for unmatched routes
-  return new Response("Not found", { status: 404 });
+  return notFound();
 }
 
