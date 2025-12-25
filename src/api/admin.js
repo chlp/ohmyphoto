@@ -92,7 +92,14 @@ async function generateAlbumIdViaAi(env, description) {
     `Include exactly 1 pleasant vivid adjective as one of the words.\n` +
     `No extra text.`;
 
-  const model = String(env.AI_ALBUM_ID_MODEL || "").trim() || "@cf/meta/llama-3.1-8b-instruct";
+  // Prefer a faster/smaller model by default; can be overridden via AI_ALBUM_ID_MODEL.
+  const model = String(env.AI_ALBUM_ID_MODEL || "").trim() || "@cf/meta/llama-2-7b-chat-int8";
+  const maxTokensRaw = Number(env.AI_ALBUM_ID_MAX_TOKENS);
+  const max_tokens = Number.isFinite(maxTokensRaw) && maxTokensRaw > 0 ? Math.min(64, Math.floor(maxTokensRaw)) : 16;
+  const tempRaw = Number(env.AI_ALBUM_ID_TEMPERATURE);
+  const temperature = Number.isFinite(tempRaw) ? Math.min(1, Math.max(0, tempRaw)) : 0.2;
+  const topPRaw = Number(env.AI_ALBUM_ID_TOP_P);
+  const top_p = Number.isFinite(topPRaw) ? Math.min(1, Math.max(0.1, topPRaw)) : 0.9;
 
   // Try twice: second attempt is stricter if model misbehaves.
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -105,9 +112,9 @@ async function generateAlbumIdViaAi(env, description) {
       // Chat-style models in Workers AI accept { messages: [...] }
       out = await env.AI.run(model, {
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 32,
-        temperature: 0.3,
-        top_p: 0.9
+        max_tokens,
+        temperature,
+        top_p
       });
     } catch (e) {
       return { ok: false, status: 502, error: "AI generation failed" };

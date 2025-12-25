@@ -2,6 +2,14 @@ name = "ohmyphoto"
 main = "src/worker.js"
 compatibility_date = "2025-12-20"
 
+[vars]
+# Workers AI model for album-id generation (override in your environment if needed).
+# Examples you can try: "@cf/meta/llama-3.1-8b-instruct", "@cf/meta/llama-2-7b-chat-int8"
+AI_ALBUM_ID_MODEL = "@cf/meta/llama-2-7b-chat-int8"
+# Speed/format knobs (optional)
+AI_ALBUM_ID_MAX_TOKENS = "16"
+AI_ALBUM_ID_TEMPERATURE = "0.2"
+
 [assets]
 binding = "ASSETS"
 directory = "./public"
