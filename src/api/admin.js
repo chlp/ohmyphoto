@@ -60,14 +60,12 @@ function normalizeAiSlugToAlbumId(raw) {
   // replace invalid chars with hyphen, then collapse
   s = s.replace(/[^a-z-]+/g, "-");
   s = s.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
-  // keep within albumId length limit
-  if (s.length > 64) s = s.slice(0, 64).replace(/-+$/g, "");
   return s;
 }
 
 function isValidAiSlugAlbumId(slug) {
   const s = String(slug || "");
-  if (!/^[a-z-]{1,64}$/.test(s)) return false;
+  if (!/^[a-z-]{1,128}$/.test(s)) return false;
   const words = s.split("-").filter(Boolean);
   if (words.length < 3 || words.length > 4) return false;
   // albumId validator allows underscores/digits too, but AI spec is letters+hyphens only
@@ -84,7 +82,7 @@ async function generateAlbumIdViaAi(env, description) {
   if (desc.length > 500) return { ok: false, status: 400, error: "Description too long" };
 
   const datePrefix = formatDatePrefixUtc(new Date());
-  const maxTotalLen = 64;
+  const maxTotalLen = 128;
   const maxSlugLen = Math.max(1, maxTotalLen - datePrefix.length);
 
   const basePrompt =

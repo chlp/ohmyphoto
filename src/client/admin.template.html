@@ -77,23 +77,27 @@
   <div class="card">
     <h2>Create album</h2>
     <div class="row" style="align-items:flex-end;">
-      <div style="flex:1;min-width:280px;">
+      <div style="flex:1;min-width:520px;">
         <label class="small muted" for="newAlbumDesc">AI description (optional):</label>
         <input id="newAlbumDesc" placeholder="семья на пляже" style="width:100%;" />
       </div>
-      <div>
-        <button class="ghost" id="genAlbumIdBtn" title="Generate a short album id (slug) via Workers AI">Generate album id (AI)</button>
-      </div>
+      <button class="ghost" id="genAlbumIdBtn" title="Generate a short album id (slug) via Workers AI">Generate album id (AI)</button>
       <div class="muted small" id="genAlbumIdStatus" style="min-width:220px;"></div>
     </div>
-    <div class="row">
+    <div class="row" style="margin-top:10px;">
       <label>Album ID:</label>
-      <input id="newAlbumId" placeholder="abc" />
+      <input id="newAlbumId" placeholder="2025.12.25-sunny-family-beach" class="mono" style="flex:1;min-width:520px;" />
+    </div>
+    <div class="row" style="margin-top:10px;">
       <label>Title:</label>
-      <input id="newTitle" placeholder="OhMyPhoto" style="min-width:280px" />
+      <input id="newTitle" placeholder="OhMyPhoto" style="flex:1;min-width:420px" />
+    </div>
+    <div class="row" style="margin-top:10px;">
       <label>Secret:</label>
-      <input id="newSecret" class="mono" placeholder="optional (a-zA-Z0-9_-)" style="min-width:280px" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+      <input id="newSecret" class="mono" placeholder="optional (a-zA-Z0-9_-)" style="flex:1;min-width:520px" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
       <button class="ghost" id="genSecretBtn" title="Generate a random secret">Generate</button>
+    </div>
+    <div class="row" style="margin-top:10px;">
       <button class="primary" id="createBtn">Create</button>
     </div>
     <div class="muted small">If Secret is empty, a random 6-hex secret will be generated automatically.</div>
