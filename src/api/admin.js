@@ -2,7 +2,7 @@ import { json } from '../utils/response.js';
 import { getAlbumInfoWithSecrets, invalidateAlbumCache } from '../utils/album.js';
 import { timingSafeEqual } from '../utils/crypto.js';
 import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/session.js';
-import { verifyTurnstileToken } from '../utils/turnstile.js';
+import { requireTurnstileOr403 } from '../utils/turnstile.js';
 import { isValidAlbumId, isValidPhotoFileName, normalizeJpgName } from '../utils/validate.js';
 import { copyObject, listAllKeys } from '../utils/r2.js';
 import { readJson } from '../utils/http.js';
@@ -252,20 +252,15 @@ export async function handleAdminRequest(request, env) {
 
     // Verify Turnstile token if secret key is configured
     if (env.TURNSTILE_SECRET_KEY) {
-      if (!turnstileToken) {
-        return new Response("Bot verification required", { status: 403 });
-      }
-      const clientIP = request.headers.get('CF-Connecting-IP') || null;
       const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
-      const turnstileResult = await verifyTurnstileToken(
-        turnstileToken,
-        env.TURNSTILE_SECRET_KEY,
-        clientIP,
-        turnstileTimeoutMs
-      );
-      if (!turnstileResult.success) {
-        return new Response("Bot verification failed", { status: 403 });
-      }
+      const err = await requireTurnstileOr403(request, {
+        token: turnstileToken,
+        secretKey: env.TURNSTILE_SECRET_KEY,
+        timeoutMs: turnstileTimeoutMs,
+        messageRequired: "Bot verification required",
+        messageFailed: "Bot verification failed"
+      });
+      if (err) return err;
     }
 
     if (!provided || !timingSafeEqual(provided, expected)) return unauthorized();

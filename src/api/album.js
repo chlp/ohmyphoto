@@ -1,6 +1,6 @@
 import { checkAlbumSecret } from '../utils/album.js';
 import { json } from '../utils/response.js';
-import { verifyTurnstileToken } from '../utils/turnstile.js';
+import { requireTurnstileOr403, verifyTurnstileRequest } from '../utils/turnstile.js';
 import { imageSig } from '../utils/crypto.js';
 import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.js';
 import { getClientIp, readJson } from '../utils/http.js';
@@ -139,22 +139,20 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
       const enforced = count >= threshold; // require Turnstile starting from (threshold + 1)-th "bad" request
 
       if (enforced) {
+        const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
         if (!turnstileToken) {
           return new Response("Bot verification required", { status: 403 });
         }
-        const clientIP = request.headers.get('CF-Connecting-IP') || null;
-        const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
         const __tVerify = __ompNowMs();
-        const turnstileResult = await verifyTurnstileToken(
-          turnstileToken,
-          env.TURNSTILE_SECRET_KEY,
-          clientIP,
-          turnstileTimeoutMs
-        );
+        const err = await requireTurnstileOr403(request, {
+          token: turnstileToken,
+          secretKey: env.TURNSTILE_SECRET_KEY,
+          timeoutMs: turnstileTimeoutMs,
+          messageRequired: "Bot verification required",
+          messageFailed: "Bot verification failed"
+        });
         __mark('turnstile_verify', __tVerify);
-        if (!turnstileResult.success) {
-          return new Response("Bot verification failed", { status: 403 });
-        }
+        if (err) return err;
 
         // Success: do not touch the counter here.
 
@@ -182,16 +180,10 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
             adjustTurnstileSoftCounter(env, clientIp, +1, windowMs).catch(() => null);
           }
         } else if (ctx && typeof ctx.waitUntil === 'function') {
-          const clientIP = request.headers.get('CF-Connecting-IP') || null;
           const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
           ctx.waitUntil((async () => {
             try {
-              const r = await verifyTurnstileToken(
-                turnstileToken,
-                env.TURNSTILE_SECRET_KEY,
-                clientIP,
-                turnstileTimeoutMs
-              );
+              const r = await verifyTurnstileRequest(request, turnstileToken, env.TURNSTILE_SECRET_KEY, turnstileTimeoutMs);
               if (r && r.success) return;
               await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
             } catch {
