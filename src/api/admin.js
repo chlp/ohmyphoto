@@ -168,7 +168,7 @@ async function generateAlbumTitleViaAi(env, description) {
   const basePrompt =
     `${desc}\n\n` +
     `Generate a short, human-friendly album title (2–6 words).\n` +
-    `- Use the same language as the input description.\n` +
+    `- Output MUST be in English.\n` +
     `- Do NOT include a date.\n` +
     `- Output must be a single line.\n` +
     `- No quotes, no extra text.`;
