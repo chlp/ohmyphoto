@@ -3,7 +3,7 @@ import { getAlbumInfoWithSecrets, invalidateAlbumCache } from '../utils/album.js
 import { timingSafeEqual } from '../utils/crypto.js';
 import { issueAdminSessionToken, verifyAdminSessionToken } from '../utils/session.js';
 import { requireTurnstileOr403 } from '../utils/turnstile.js';
-import { isValidAlbumId, isValidPhotoFileName, normalizeJpgName } from '../utils/validate.js';
+import { isValidAlbumId, isValidAlbumSecret, isValidPhotoFileName, normalizeJpgName } from '../utils/validate.js';
 import { copyObject, listAllKeys } from '../utils/r2.js';
 import { readJson } from '../utils/http.js';
 
@@ -50,9 +50,9 @@ function randomHex(bytesLen) {
   return hex;
 }
 
-function generateAlbumSecret32() {
-  // 16 bytes => 32 hex chars
-  return randomHex(16);
+function generateAlbumSecret6() {
+  // 3 bytes => 6 hex chars
+  return randomHex(3);
 }
 
 async function listAlbumInfoKeys(env) {
@@ -496,13 +496,15 @@ export async function handleAdminRequest(request, env) {
     if (!body) return badRequest("Bad JSON");
     const albumId = String(body.albumId || "").trim();
     const title = String(body.title || "OhMyPhoto");
+    const secretIn = body.secret != null ? String(body.secret || "").trim() : "";
 
     if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+    if (secretIn && !isValidAlbumSecret(secretIn)) return badRequest("Invalid secret");
 
     const existing = await env.BUCKET.get(`albums/${albumId}/info.json`);
     if (existing) return conflict("Album already exists");
 
-    const secret = generateAlbumSecret32();
+    const secret = secretIn || generateAlbumSecret6();
     const info = { title, secrets: { [secret]: {} }, files: [] };
     await putInfoJson(env, albumId, info);
     // Return secret as a convenience for the UI/caller (still admin-protected).

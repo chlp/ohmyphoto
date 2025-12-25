@@ -81,8 +81,12 @@
       <input id="newAlbumId" placeholder="abc" />
       <label>Title:</label>
       <input id="newTitle" placeholder="OhMyPhoto" style="min-width:280px" />
+      <label>Secret:</label>
+      <input id="newSecret" class="mono" placeholder="optional (a-zA-Z0-9_-)" style="min-width:280px" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+      <button class="ghost" id="genSecretBtn" title="Generate a random secret">Generate</button>
       <button class="primary" id="createBtn">Create</button>
     </div>
+    <div class="muted small">If Secret is empty, a random 6-hex secret will be generated automatically.</div>
   </div>
 
   <div class="card" id="albumsCard">
@@ -853,11 +857,29 @@
     $('createBtn').onclick = async () => {
       const albumId = $('newAlbumId').value.trim();
       const title = $('newTitle').value.trim() || 'OhMyPhoto';
+      const secretEl = $('newSecret');
+      const secretRaw = secretEl.value.trim();
       if (!albumId) return alert('albumId required');
+      const isValidSecret = (s) => /^[a-zA-Z0-9_-]{1,256}$/.test(String(s || ''));
+      function randomHex(bytesLen) {
+        const bytes = new Uint8Array(bytesLen);
+        crypto.getRandomValues(bytes);
+        let hex = "";
+        for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+        return hex;
+      }
+      function generateSecret6() {
+        // 3 bytes => 6 hex chars
+        return randomHex(3);
+      }
+      if (secretRaw && !isValidSecret(secretRaw)) {
+        return alert('Invalid secret. Allowed: a-z A-Z 0-9 _ - (max 256 chars).');
+      }
+      const secret = secretRaw || generateSecret6();
       const r = await api('/api/admin/album', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ albumId, title })
+        body: JSON.stringify({ albumId, title, secret })
       });
       if (!r.ok) {
         const t = await r.text();
@@ -865,7 +887,18 @@
         return;
       }
       $('newAlbumId').value = '';
+      $('newSecret').value = '';
       await refresh();
+    };
+
+    $('genSecretBtn').onclick = () => {
+      const secretEl = $('newSecret');
+      const bytes = new Uint8Array(3); // 3 bytes => 6 hex chars
+      crypto.getRandomValues(bytes);
+      let hex = "";
+      for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+      secretEl.value = hex;
+      try { secretEl.focus(); secretEl.select(); } catch {}
     };
 
     refresh().catch(err => {

@@ -70,7 +70,7 @@ export async function getAlbumInfoWithSecrets(albumId, env) {
  * Check secret for album using info.json
  * @param {string} albumId
  * @param {string} secret
- * @param {Object} env - Environment с BUCKET
+ * @param {Object} env - Environment with BUCKET
  * @returns {Promise<{success: true, info: Object, matchedSecret: string}|{success: false, response: Response}>}
  */
 export async function checkAlbumSecret(albumId, secret, env) {

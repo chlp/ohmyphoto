@@ -7,6 +7,12 @@ export function isValidAlbumId(albumId) {
   return /^[a-zA-Z0-9_-]{1,64}$/.test(String(albumId || ""));
 }
 
+export function isValidAlbumSecret(secret) {
+  // Secret is used verbatim in the URL hash (see admin UI), so keep it URL-fragment safe.
+  // Use a permissive but safe charset to avoid encoding/decoding mismatches.
+  return /^[a-zA-Z0-9_-]{1,256}$/.test(String(secret || ""));
+}
+
 export function normalizeJpgName(input) {
   let name = String(input || "").trim();
   if (!name) return "";
