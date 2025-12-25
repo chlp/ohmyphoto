@@ -20,6 +20,7 @@
     .danger { background: #b42318; color: #fff; border: 0; padding: 8px 12px; border-radius: 6px; }
     .primary { background: #175cd3; color: #fff; border: 0; padding: 8px 12px; border-radius: 6px; }
     .ghost { background: #fff; border: 1px solid #ccc; padding: 8px 12px; border-radius: 6px; }
+    .genBtn { min-width: 112px; }
     code { background: #f6f6f6; padding: 2px 4px; border-radius: 4px; }
     .hidden { display: none; }
     .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
@@ -66,7 +67,7 @@
   <div class="card">
     <h2>Auth</h2>
     <div class="row">
-      <label>Admin token:</label>
+      <label class="small muted" for="token">Admin token:</label>
       <input id="token" type="password" placeholder="ADMIN_TOKEN" style="min-width:280px" />
       <button class="ghost" id="saveToken">Login</button>
       <button class="ghost" id="logout">Logout</button>
@@ -81,26 +82,31 @@
         <label class="small muted" for="newAlbumDesc">AI description (optional):</label>
         <input id="newAlbumDesc" placeholder="семья на пляже" style="width:100%;" />
       </div>
-      <button class="ghost" id="genAlbumIdBtn" title="Generate a short album id (slug) via Workers AI">Generate album id (AI)</button>
-      <div class="muted small" id="genAlbumIdStatus" style="min-width:220px;"></div>
+      <button class="ghost genBtn" id="genAlbumIdBtn" title="Generate a short album id (slug) via Workers AI">Generate</button>
     </div>
-    <div class="row" style="margin-top:10px;">
-      <label>Album ID:</label>
-      <input id="newAlbumId" placeholder="2025.12.25-sunny-family-beach" class="mono" style="flex:1;min-width:520px;" />
+    <div class="muted small" id="genAlbumIdStatus" style="margin-top:6px;"></div>
+    <div class="row" style="align-items:flex-end;margin-top:10px;">
+      <div style="flex:1;min-width:520px;">
+        <label class="small muted" for="newAlbumId">Album ID:</label>
+        <input id="newAlbumId" placeholder="2025.12.25-sunny-family-beach" class="mono" style="width:100%;" />
+      </div>
     </div>
-    <div class="row" style="margin-top:10px;">
-      <label>Title:</label>
-      <input id="newTitle" placeholder="OhMyPhoto" style="flex:1;min-width:420px" />
+    <div class="row" style="align-items:flex-end;margin-top:10px;">
+      <div style="flex:1;min-width:420px;">
+        <label class="small muted" for="newTitle">Title:</label>
+        <input id="newTitle" placeholder="OhMyPhoto" style="width:100%;" />
+      </div>
     </div>
-    <div class="row" style="margin-top:10px;">
-      <label>Secret:</label>
-      <input id="newSecret" class="mono" placeholder="optional (a-zA-Z0-9_-)" style="flex:1;min-width:520px" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
-      <button class="ghost" id="genSecretBtn" title="Generate a random secret">Generate</button>
+    <div class="row" style="align-items:flex-end;margin-top:10px;">
+      <div style="flex:1;min-width:520px;">
+        <label class="small muted" for="newSecret">Secret:</label>
+        <input id="newSecret" class="mono" placeholder="optional (a-zA-Z0-9_-)" style="width:100%;" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+      </div>
+      <button class="ghost genBtn" id="genSecretBtn" title="Generate a random secret">Generate</button>
     </div>
     <div class="row" style="margin-top:10px;">
       <button class="primary" id="createBtn">Create</button>
     </div>
-    <div class="muted small">If Secret is empty, a random 6-hex secret will be generated automatically.</div>
   </div>
 
   <div class="card" id="albumsCard">
@@ -146,7 +152,7 @@
       <h3 style="margin-top:0;">Upload photos</h3>
       <div class="row">
         <input id="uploadInput" type="file" accept="image/*" multiple />
-        <label class="row" style="gap:6px;">
+        <label class="row small muted" style="gap:6px;">
           <input id="overwriteUpload" type="checkbox" />
           overwrite existing
         </label>
