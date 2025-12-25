@@ -61,8 +61,19 @@
 <body>
   <h1>OhMyPhoto Admin</h1>
 
-  <!-- Turnstile widget container (kept off-screen to avoid layout impact) -->
-  <div id="turnstile-widget" style="position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;"></div>
+  <!-- Turnstile containers:
+       - Invisible/offscreen is used first (no UI).
+       - Modal is shown only if invisible execution can't get a token (likely needs interaction; common on iOS Safari). -->
+  <div id="turnstile-offscreen" style="position:absolute;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;">
+    <div id="turnstile-widget-invisible"></div>
+  </div>
+  <div id="turnstile-modal"
+    style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:9999;">
+    <div style="background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px;max-width:360px;width:calc(100% - 32px);">
+      <div class="muted small" style="margin-bottom:10px;">Please complete verification to login.</div>
+      <div id="turnstile-widget-visible" style="min-height:72px;"></div>
+    </div>
+  </div>
 
   <div class="card">
     <h2>Auth</h2>
@@ -185,6 +196,25 @@
     let currentEditAlbumId = '';
     let currentEditSecret = '';
 
+    // Storage wrapper: iOS Safari (especially Private Mode / some WebViews) can throw on localStorage access.
+    const __memoryStore = Object.create(null);
+    function safeStorageGet(k) {
+      try { return localStorage.getItem(k); } catch {}
+      try { return sessionStorage.getItem(k); } catch {}
+      return __memoryStore[k] || null;
+    }
+    function safeStorageSet(k, v) {
+      try { localStorage.setItem(k, v); return { ok: true, where: 'localStorage' }; } catch {}
+      try { sessionStorage.setItem(k, v); return { ok: true, where: 'sessionStorage' }; } catch {}
+      __memoryStore[k] = String(v);
+      return { ok: false, where: 'memory' };
+    }
+    function safeStorageRemove(k) {
+      try { localStorage.removeItem(k); } catch {}
+      try { sessionStorage.removeItem(k); } catch {}
+      try { delete __memoryStore[k]; } catch {}
+    }
+
     function base64UrlDecodeToJson(b64url) {
       try {
         const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
@@ -196,67 +226,130 @@
       }
     }
 
+    function showTurnstileModal(show) {
+      const modal = $('turnstile-modal');
+      if (!modal) return;
+      modal.style.display = show ? 'flex' : 'none';
+    }
+
+    function sleep(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+
+    async function waitForTurnstileScript(timeoutMs = 3000) {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeoutMs) {
+        if (typeof turnstile !== 'undefined') return true;
+        await sleep(50);
+      }
+      return typeof turnstile !== 'undefined';
+    }
+
     async function getTurnstileTokenOnce() {
       if (!TURNSTILE_SITE_KEY || TURNSTILE_SITE_KEY === 'YOUR_TURNSTILE_SITE_KEY') return '';
       try {
-        // Wait for Turnstile script to load (poll with timeout)
-        await new Promise((resolve) => {
-          const startedAt = Date.now();
-          const tick = () => {
-            if (typeof turnstile !== 'undefined') return resolve();
-            if (Date.now() - startedAt > 3000) return resolve(); // 3s timeout
-            setTimeout(tick, 50);
-          };
-          tick();
-        });
+        const loaded = await waitForTurnstileScript(3000);
+        if (!loaded) return '';
 
-        if (typeof turnstile === 'undefined') return '';
-
-        return await new Promise((resolve) => {
+        // First attempt: invisible/offscreen execution (no UI)
+        const token1 = await new Promise((resolve) => {
           let resolved = false;
           const timeout = setTimeout(() => {
             if (!resolved) {
               resolved = true;
-              resolve(''); // Timeout - continue without token
+              resolve('');
             }
-          }, 5000);
+          }, 3500);
 
-          const widgetId = turnstile.render('#turnstile-widget', {
-            sitekey: TURNSTILE_SITE_KEY,
-            callback: (token) => {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                resolve(token);
-              }
-            },
-            'error-callback': () => {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timeout);
-                resolve(''); // Continue without token on error
-              }
-            },
-            size: 'normal',
-            execution: 'execute'
-          });
+          let widgetId;
+          try {
+            widgetId = turnstile.render('#turnstile-widget-invisible', {
+              sitekey: TURNSTILE_SITE_KEY,
+              callback: (t) => {
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  resolve(String(t || ''));
+                }
+              },
+              'error-callback': () => {
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  resolve('');
+                }
+              },
+              size: 'normal',
+              execution: 'execute'
+            });
+          } catch (e) {
+            clearTimeout(timeout);
+            return resolve('');
+          }
 
           try { turnstile.reset(widgetId); } catch {}
           try { turnstile.execute(widgetId); } catch { resolve(''); }
         });
+
+        if (token1) return token1;
+
+        // Second attempt: show a visible widget (needed when Turnstile requires interaction).
+        showTurnstileModal(true);
+        const token2 = await new Promise((resolve) => {
+          let resolved = false;
+          const timeout = setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              resolve('');
+            }
+          }, 60_000);
+
+          let widgetId;
+          try {
+            widgetId = turnstile.render('#turnstile-widget-visible', {
+              sitekey: TURNSTILE_SITE_KEY,
+              callback: (t) => {
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  resolve(String(t || ''));
+                }
+              },
+              'error-callback': () => {
+                if (!resolved) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  resolve('');
+                }
+              }
+            });
+          } catch (e) {
+            clearTimeout(timeout);
+            return resolve('');
+          }
+
+          // If it supports execution=execute here, it's fine; if not, user interaction will trigger.
+          try { turnstile.reset(widgetId); } catch {}
+          try { turnstile.execute(widgetId); } catch {}
+        });
+        showTurnstileModal(false);
+        return token2;
       } catch (err) {
         return '';
       }
     }
 
     function getSessionToken() {
-      return localStorage.getItem('ohmyphoto_admin_session') || '';
+      return safeStorageGet('ohmyphoto_admin_session') || '';
     }
     function setSessionToken(t) {
-      localStorage.setItem('ohmyphoto_admin_session', t);
+      const r = safeStorageSet('ohmyphoto_admin_session', String(t || ''));
+      if (r.where === 'memory') {
+        authInfoEl.textContent = 'Logged in, but your browser blocks storage (iOS Private Mode/WebView). Session will not persist after refresh.';
+      }
     }
     function clearSessionToken() {
-      localStorage.removeItem('ohmyphoto_admin_session');
+      safeStorageRemove('ohmyphoto_admin_session');
     }
 
     function getSessionPayload(sessionToken) {
@@ -285,8 +378,8 @@
         return;
       }
       const ageMs = now - payload.iat;
-      const twelveHoursMs = 5 * 24 * 60 * 60 * 1000;
-      if (ageMs > twelveHoursMs) {
+      const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
+      if (ageMs > fiveDaysMs) {
         clearSessionToken();
         authInfoEl.textContent = 'Session is old. Please login again.';
         return;
@@ -304,32 +397,53 @@
     };
 
     $('saveToken').onclick = async () => {
-      const adminToken = tokenEl.value || '';
-      if (!adminToken) {
-        statusEl.textContent = 'Enter admin token.';
-        return;
+      try {
+        const adminToken = tokenEl.value || '';
+        if (!adminToken) {
+          statusEl.textContent = 'Enter admin token.';
+          return;
+        }
+
+        // iOS can silently block storage (Private Mode/WebViews). Preflight to avoid "nothing happens".
+        const storageProbe = safeStorageSet('__ohmyphoto_storage_probe__', '1');
+        safeStorageRemove('__ohmyphoto_storage_probe__');
+        if (storageProbe.where === 'memory') {
+          authInfoEl.textContent = 'Your browser blocks storage (common on iOS Private Mode/WebView). Login will work, but won’t persist after refresh.';
+        }
+
+        statusEl.textContent = 'Logging in...';
+        const turnstileToken = await getTurnstileTokenOnce();
+        if (TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY !== 'YOUR_TURNSTILE_SITE_KEY' && !turnstileToken) {
+          // Server may not require it, but if it does, this will otherwise look like a no-op on iOS.
+          statusEl.textContent = 'Verification not completed. If you are on iOS Safari, disable Private Mode / content blockers and try again.';
+        }
+
+        const resp = await fetch('/api/admin/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: adminToken, turnstileToken })
+        });
+
+        if (!resp.ok) {
+          const t = await resp.text().catch(() => '');
+          statusEl.textContent = `Login failed: ${resp.status}${t ? ` (${t.slice(0, 120)})` : ''}`;
+          return;
+        }
+
+        const data = await resp.json().catch(() => null);
+        if (!data || !data.sessionToken) {
+          statusEl.textContent = 'Login failed: no session token';
+          return;
+        }
+
+        setSessionToken(data.sessionToken);
+        tokenEl.value = '';
+        enforceSessionFreshness();
+        statusEl.textContent = 'Logged in.';
+        await refresh();
+      } catch (e) {
+        statusEl.textContent = `Login error: ${String(e && e.message ? e.message : e)}`;
       }
-      statusEl.textContent = 'Logging in...';
-      const turnstileToken = await getTurnstileTokenOnce();
-      const resp = await fetch('/api/admin/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: adminToken, turnstileToken })
-      });
-      if (!resp.ok) {
-        statusEl.textContent = `Login failed: ${resp.status}`;
-        return;
-      }
-      const data = await resp.json();
-      if (!data.sessionToken) {
-        statusEl.textContent = 'Login failed: no session token';
-        return;
-      }
-      setSessionToken(data.sessionToken);
-      tokenEl.value = '';
-      enforceSessionFreshness();
-      statusEl.textContent = 'Logged in.';
-      await refresh();
     };
 
     async function api(path, options = {}) {
