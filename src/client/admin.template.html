@@ -34,7 +34,27 @@
     .qrDetails { display: inline-block; }
     .qrDetails > summary { cursor: pointer; user-select: none; font-size: 11px; color: #666; }
     .qrDetails[open] > summary { color: #111; }
-    .qrImg { width: 120px; height: 120px; display: block; margin-top: 6px; border: 1px solid #eee; border-radius: 8px; background: #fff; }
+    .qrBox {
+      width: 112px;
+      height: 112px;
+      display: grid;
+      place-items: center;
+      margin-top: 6px;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      background: #fff;
+      overflow: hidden;
+    }
+    /* Force the generated canvas/svg to fit inside the box */
+    .qrBox canvas,
+    .qrBox svg,
+    .qrBox img {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+    }
+    .qrActions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; justify-content: center; }
+    .qrActions button { font-size: 11px; padding: 5px 8px; border-radius: 6px; }
   </style>
 </head>
 <body>
@@ -302,6 +322,74 @@
         .filter(Boolean);
     }
 
+    // Styled QR (browser-only) via ESM CDN import (no server-side generation)
+    // Vendored ESM build (keeps admin working without external CDNs)
+    const QR_CODE_STYLING_URL = '/vendor/qr-code-styling.esm.js';
+    let __qrLibPromise = null;
+    async function loadQrCodeStyling() {
+      if (!__qrLibPromise) {
+        __qrLibPromise = import(QR_CODE_STYLING_URL).then((m) => m.default || m.QRCodeStyling || m);
+      }
+      return __qrLibPromise;
+    }
+    const __qrInstances = new WeakMap(); // detailsEl -> QRCodeStyling instance
+
+    async function ensureAdminQr(detailsEl, boxEl, data) {
+      if (!detailsEl || !boxEl) return null;
+      const d = String(data || '');
+      if (!d) return null;
+
+      const existing = __qrInstances.get(detailsEl);
+      if (existing) {
+        try { existing.update({ data: d }); } catch {}
+        return existing;
+      }
+
+      boxEl.textContent = 'Loading…';
+      try {
+        const QRCodeStyling = await loadQrCodeStyling();
+        const qr = new QRCodeStyling({
+          width: 256,
+          height: 256,
+          type: 'canvas',
+          data: d,
+          margin: 12,
+          qrOptions: { errorCorrectionLevel: 'H' },
+          image: '/apple-touch-icon.png',
+          imageOptions: { margin: 6, imageSize: 0.28 },
+          dotsOptions: {
+            type: 'rounded',
+            gradient: {
+              type: 'linear',
+              rotation: Math.PI / 4,
+              colorStops: [
+                { offset: 0, color: '#111827' },
+                { offset: 1, color: '#175cd3' },
+              ],
+            }
+          },
+          cornersSquareOptions: { type: 'extra-rounded', color: '#111827' },
+          cornersDotOptions: { type: 'dot', color: '#111827' },
+          backgroundOptions: { color: '#FFFFFF' },
+        });
+        boxEl.textContent = '';
+        qr.append(boxEl);
+        // Defensive: ensure the inserted element scales down to the container
+        const inserted = boxEl.querySelector('canvas,svg,img');
+        if (inserted) {
+          inserted.style.width = '100%';
+          inserted.style.height = '100%';
+          inserted.style.display = 'block';
+        }
+        __qrInstances.set(detailsEl, qr);
+        return qr;
+      } catch (e) {
+        console.error('qr-code-styling failed', e);
+        boxEl.textContent = 'QR unavailable';
+        return null;
+      }
+    }
+
     function renderAlbumLinks(containerEl, albumId, secrets) {
       if (!containerEl) return;
       containerEl.innerHTML = '';
@@ -333,20 +421,45 @@
         a.title = `/${id}#${sec}`;
         wrap.appendChild(a);
 
-        // Compact QR code (lazy-loaded) for this public URL
+        // Styled QR code (lazy-loaded) for this public URL
         const fullUrl = `${location.origin}/${encodeURIComponent(id)}#${sec}`;
         const d = document.createElement('details');
         d.className = 'qrDetails';
         const s = document.createElement('summary');
         s.textContent = 'QR';
-        const img = document.createElement('img');
-        img.className = 'qrImg';
-        img.loading = 'lazy';
-        img.alt = `QR: ${fullUrl}`;
-        // Tiny external generator to keep admin bundle minimal
-        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(fullUrl)}`;
+        const box = document.createElement('div');
+        box.className = 'qrBox';
+        box.setAttribute('aria-label', `QR: ${fullUrl}`);
+        const actions = document.createElement('div');
+        actions.className = 'qrActions';
+        const dlPng = document.createElement('button');
+        dlPng.className = 'ghost';
+        dlPng.type = 'button';
+        dlPng.textContent = 'PNG';
+        dlPng.onclick = async () => {
+          const qr = await ensureAdminQr(d, box, fullUrl);
+          if (qr && typeof qr.download === 'function') {
+            await qr.download({ name: `album-${encodeURIComponent(id)}`, extension: 'png' });
+          }
+        };
+        const dlSvg = document.createElement('button');
+        dlSvg.className = 'ghost';
+        dlSvg.type = 'button';
+        dlSvg.textContent = 'SVG';
+        dlSvg.onclick = async () => {
+          const qr = await ensureAdminQr(d, box, fullUrl);
+          if (qr && typeof qr.download === 'function') {
+            await qr.download({ name: `album-${encodeURIComponent(id)}`, extension: 'svg' });
+          }
+        };
+        actions.appendChild(dlPng);
+        actions.appendChild(dlSvg);
         d.appendChild(s);
-        d.appendChild(img);
+        d.appendChild(box);
+        d.appendChild(actions);
+        d.addEventListener('toggle', () => {
+          if (d.open) ensureAdminQr(d, box, fullUrl);
+        });
         wrap.appendChild(d);
 
         containerEl.appendChild(wrap);
