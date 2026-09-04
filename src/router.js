@@ -28,7 +28,7 @@ export async function route(request, env, ctx) {
     const albumId = decodeURIComponent(mImg[1]);
     const kind = mImg[2];
     const name = decodeURIComponent(mImg[3]);
-    return handleImageRequest(request, env, albumId, kind, name);
+    return handleImageRequest(request, env, albumId, kind, name, ctx);
   }
 
   // 404 for unmatched routes

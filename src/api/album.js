@@ -93,6 +93,12 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   const secret = String(body?.secret || "");
   const turnstileToken = String(body?.turnstileToken || "");
 
+  // Kick off the info.json / secret check now so it overlaps with the Turnstile
+  // soft-counter round-trip below instead of running after it.
+  const __tSecret = __ompNowMs();
+  const secretCheckPromise = checkAlbumSecret(albumId, secret, env);
+  secretCheckPromise.catch(() => {}); // avoid unhandled rejection if we return early (403)
+
   // Verify Turnstile token if secret key is configured.
   // Optimization: if browser already passed Turnstile recently, accept a short-lived signed cookie.
   let setBypassCookie = false;
@@ -202,9 +208,8 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
     __mark('turnstile_total', __tTurnstile);
   }
 
-  // Check if album exists and secret is valid
-  const __tSecret = __ompNowMs();
-  const checkResult = await checkAlbumSecret(albumId, secret, env);
+  // Check if album exists and secret is valid (started above)
+  const checkResult = await secretCheckPromise;
   __mark('album_secret', __tSecret);
   if (!checkResult.success) {
     return checkResult.response;

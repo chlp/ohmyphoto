@@ -27,7 +27,7 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
   - `TURNSTILE_SOFT_THRESHOLD` (default: `100`)
   - `TURNSTILE_SOFT_WINDOW_MS` (default: `86400000` i.e. 24h)
   - `TURNSTILE_SOFT_DO_TIMEOUT_MS` (default: `300`) – best-effort timeout for the DO calls (fail-open)
-- **Signed image URLs**: photo/preview URLs include a signature (`?s=...`, HMAC-SHA256 keyed by the album secret), so the browser can fetch images without re-sending the secret (and without re-running Turnstile per image).
+- **Signed image URLs**: photo/preview URLs include a signature (`?s=...`, HMAC-SHA256 keyed by the album secret), so the browser can fetch images without re-sending the secret (and without re-running Turnstile per image). Image responses are cached at the Cloudflare edge for a day (`IMAGE_EDGE_MAX_AGE_S`) and in the browser for an hour.
 
 ## Rate limiting
 

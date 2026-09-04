@@ -107,7 +107,15 @@ describe("album lifecycle", () => {
     const img = await SELF.fetch(`https://x${g.files[0].previewUrl}`);
     expect(img.status).toBe(200);
     expect(img.headers.get("Content-Type")).toBe("image/jpeg");
+    expect(img.headers.get("Cache-Control")).toBe("public, max-age=3600, s-maxage=86400");
+    expect(img.headers.get("X-OhMyPhoto-Cache")).toBe("MISS");
     expect(new Uint8Array(await img.arrayBuffer())).toEqual(JPEG);
+
+    // second request for the same signed URL is served from the edge cache
+    const img2 = await SELF.fetch(`https://x${g.files[0].previewUrl}`);
+    expect(img2.status).toBe(200);
+    expect(img2.headers.get("X-OhMyPhoto-Cache")).toBe("HIT");
+    expect(new Uint8Array(await img2.arrayBuffer())).toEqual(JPEG);
 
     expect((await SELF.fetch(`https://x/img/${albumId}/photos/a.jpg`)).status).toBe(403);
     expect((await SELF.fetch(`https://x/img/${albumId}/photos/a.jpg?s=${"0".repeat(64)}`)).status).toBe(403);
@@ -116,7 +124,9 @@ describe("album lifecycle", () => {
     // rotate secrets: old sig stops working, cache is invalidated
     const upd = await api(`/album/${albumId}`, jsonInit("PUT", { title: "Lake 2", secrets: ["newsecret"] }));
     expect(upd.status).toBe(200);
-    expect((await SELF.fetch(`https://x${g.files[0].previewUrl}`)).status).toBe(403);
+    // g.files[0].previewUrl is intentionally still served from the edge cache (documented trade-off);
+    // an uncached URL signed with the old secret must be rejected.
+    expect((await SELF.fetch(`https://x${g.files[1].previewUrl}`)).status).toBe(403);
     const g2 = await (await SELF.fetch(`https://x/api/album/${albumId}`, jsonInit("POST", { secret: "newsecret" }))).json();
     expect(g2.title).toBe("Lake 2");
     const info = await (await env.BUCKET.get(`albums/${albumId}/info.json`)).json();

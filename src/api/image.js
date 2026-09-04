@@ -3,10 +3,27 @@ import { getAlbumInfoWithSecrets } from '../utils/album.js';
 import { forbidden, notFound } from '../utils/response.js';
 import { isValidAlbumId, isValidPhotoFileName } from '../utils/validate.js';
 
+// Browser cache 1h; Cloudflare edge cache (Cache API, per PoP) 1 day.
+// Trade-off: after a secret rotation, already-cached signed URLs keep working at the edge
+// until s-maxage expires. Lower IMAGE_EDGE_MAX_AGE_S if faster revocation matters more.
+const BROWSER_MAX_AGE_S = 3600;
+const EDGE_MAX_AGE_S = 86400;
+
+function getEdgeCache() {
+  try {
+    return typeof caches !== 'undefined' && caches.default ? caches.default : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Handle GET /img/<albumId>/(photos|preview)/<name>
+ * Handle GET /img/<albumId>/(photos|preview)/<name>?s=<sig>
+ *
+ * The signature is part of the URL, so a cache hit means this exact URL was already
+ * verified; no need to re-load info.json for cached responses.
  */
-export async function handleImageRequest(request, env, albumId, kind, name) {
+export async function handleImageRequest(request, env, albumId, kind, name, ctx) {
   const url = new URL(request.url);
   const sig = url.searchParams.get('s') || '';
 
@@ -24,6 +41,19 @@ export async function handleImageRequest(request, env, albumId, kind, name) {
   // Require signature
   if (!sig) {
     return forbidden();
+  }
+
+  const edgeMaxAge = Number(env.IMAGE_EDGE_MAX_AGE_S) || EDGE_MAX_AGE_S;
+  const cache = edgeMaxAge > 0 ? getEdgeCache() : null;
+  // Normalize the key: drop request headers (Range etc.), keep URL incl. signature.
+  const cacheKey = cache ? new Request(url.toString(), { method: 'GET' }) : null;
+  if (cache) {
+    const hit = await cache.match(cacheKey).catch(() => null);
+    if (hit) {
+      const headers = new Headers(hit.headers);
+      headers.set("X-OhMyPhoto-Cache", "HIT");
+      return new Response(hit.body, { status: hit.status, headers });
+    }
   }
 
   // Validate signature against any secret in info.json (secrets set)
@@ -57,8 +87,15 @@ export async function handleImageRequest(request, env, albumId, kind, name) {
   obj.writeHttpMetadata(headers);
   headers.set("ETag", obj.httpEtag);
   headers.set("X-Robots-Tag", "noindex, nofollow");
-  headers.set("Cache-Control", "public, max-age=3600");
+  headers.set("Cache-Control", `public, max-age=${BROWSER_MAX_AGE_S}, s-maxage=${edgeMaxAge}`);
+  headers.set("X-OhMyPhoto-Cache", "MISS");
 
-  return new Response(obj.body, { headers });
+  const response = new Response(obj.body, { headers });
+
+  if (cache) {
+    const put = cache.put(cacheKey, response.clone()).catch(() => null);
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(put);
+  }
+
+  return response;
 }
-

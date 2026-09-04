@@ -251,10 +251,22 @@
 
     setStatusText('Loading...');
 
+    // The inline <head> script may have already started the first (token-less) request.
+    function takeEarlyAlbumFetch() {
+      const p = window.__ohmyphotoAlbumFetch;
+      const key = window.__ohmyphotoAlbumFetchKey;
+      window.__ohmyphotoAlbumFetch = null;
+      window.__ohmyphotoAlbumFetchKey = null;
+      if (!p || typeof p.then !== 'function') return null;
+      if (key !== `${albumId}#${secret}`) return null;
+      return p;
+    }
+
     async function fetchAlbumOnce(turnstileToken) {
       const url = `/api/album/${encodeURIComponent(albumId)}`;
       const t0 = __ompNow();
-      __ompLog('album request -> send', {
+      const early = turnstileToken ? null : takeEarlyAlbumFetch();
+      __ompLog(early ? 'album request -> reuse early fetch' : 'album request -> send', {
         url,
         albumId,
         hasTurnstileToken: Boolean(turnstileToken),
@@ -263,12 +275,16 @@
       const timeoutMs = 15000;
       const timeout = setTimeout(() => controller.abort(new Error('Request timeout')), timeoutMs);
       try {
-        const resp = await fetch(url, {
+        const started = early || fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ secret, turnstileToken: String(turnstileToken || '') }),
           signal: controller.signal
         });
+        const resp = await Promise.race([
+          started,
+          new Promise((_, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason || new Error('Request timeout'))))
+        ]);
         __ompLog('album request <- response', {
           url,
           status: resp.status,
@@ -440,13 +456,18 @@
       fullSrc: String(f.photoUrl || '')
     }));
 
+    const EAGER_IMAGES = 8;
+    const HIGH_PRIORITY_IMAGES = 4;
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       const item = document.createElement('div');
       item.className = 'gallery-item';
 
       const img = document.createElement('img');
-      img.loading = 'lazy';
+      // First screen: load eagerly with high priority; the rest lazily.
+      img.loading = i < EAGER_IMAGES ? 'eager' : 'lazy';
+      if (i < HIGH_PRIORITY_IMAGES) img.fetchPriority = 'high';
+      img.decoding = 'async';
       img.alt = 'Photography';
       img.src = String(f.previewUrl || f.photoUrl || '');
       img.dataset.index = String(i);

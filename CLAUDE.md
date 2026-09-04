@@ -66,9 +66,9 @@ albums/<albumId>/preview/<name>  # preview images (JPEG, same file name)
 
 ## Authentication model
 
-**Album access**: Secret is passed in the URL fragment (`/<albumId>#<secret>`). `public/ui.js` reads `location.hash` and POSTs `{ secret, turnstileToken }` to `/api/album/<albumId>`. The Worker validates against `info.json` without logging or persisting the secret. Response includes `Server-Timing` (per-phase timings) and `X-OhMyPhoto-FileCount` headers, `Cache-Control: no-store`.
+**Album access**: Secret is passed in the URL fragment (`/<albumId>#<secret>`). The client reads `location.hash` and POSTs `{ secret, turnstileToken }` to `/api/album/<albumId>` (first attempt without a token, see "Early album fetch" below; Turnstile only on 403). The Worker starts the `info.json`/secret check before the Turnstile soft-counter round-trip so the two overlap, and validates without logging or persisting the secret. Response includes `Server-Timing` (per-phase timings) and `X-OhMyPhoto-FileCount` headers, `Cache-Control: no-store`.
 
-**Signed image URLs**: The album response returns photo/preview URLs with `?s=<sig>` where `sig = HMAC-SHA256(key = secret, msg = "albumId:name")` hex (`src/utils/crypto.js:imageSig`). The admin UI computes the same HMAC client-side (`admin.template.html:imageSig`) — keep the two in sync. `src/api/image.js` checks the signature against *every* secret of the album with `timingSafeEqual` (no early exit), then streams from R2 with `Cache-Control: public, max-age=3600`.
+**Signed image URLs**: The album response returns photo/preview URLs with `?s=<sig>` where `sig = HMAC-SHA256(key = secret, msg = "albumId:name")` hex (`src/utils/crypto.js:imageSig`). The admin UI computes the same HMAC client-side (`admin.template.html:imageSig`) — keep the two in sync. `src/api/image.js` first checks the Cloudflare edge cache (Cache API, key = full URL incl. signature, `X-OhMyPhoto-Cache: HIT|MISS`); on a miss it validates the signature against *every* secret with `timingSafeEqual` (no early exit), streams from R2 with `Cache-Control: public, max-age=3600, s-maxage=86400` and stores the response via `ctx.waitUntil`. Trade-off: after a secret rotation, URLs already cached at an edge keep working up to `IMAGE_EDGE_MAX_AGE_S` (default 86400; `0` disables edge caching).
 
 **Admin**: Two-step.
 1. `POST /api/admin/session` with `{ token: <ADMIN_TOKEN>, turnstileToken? }`. Turnstile is verified here if `TURNSTILE_SECRET_KEY` is set. On success returns an HMAC-SHA256 session token (signed with `ADMIN_TOKEN`, 7-day TTL, `src/utils/session.js`).
@@ -131,9 +131,12 @@ All under `/api/admin/`, Bearer session token required except `session`:
 
 ## Client
 
-- `src/client/index.template.html` → `public/index.html` (gallery shell: grid, lightbox, Turnstile widgets). Gallery logic lives in `public/ui.js` (tracked in git, **not** generated). Images use `loading="lazy"`.
+- `src/client/index.template.html` → `public/index.html` (gallery shell: grid, lightbox, Turnstile widgets). Gallery logic lives in `public/ui.js` (tracked in git, **not** generated).
+- **Early album fetch**: an inline script at the top of `<head>` (before the stylesheet) POSTs `/api/album/<id>` immediately and stores the promise in `window.__ohmyphotoAlbumFetch` (+ `__ohmyphotoAlbumFetchKey = "albumId#secret"`). `ui.js:fetchAlbumOnce` reuses it for the first token-less request, so the API round-trip overlaps CSS/JS download. Keep the request body identical in both places.
+- Grid images: first 8 `loading="eager"`, first 4 `fetchpriority="high"`, rest lazy (`EAGER_IMAGES` / `HIGH_PRIORITY_IMAGES` in `ui.js`).
+- `public/styles.css` is a local copy of `https://plushka.se/styles.css` (background `url()`s rewritten to absolute plushka.se URLs). Served immutable for a year, so bump the `?v=` in the template whenever it changes. Re-sync manually if the main site's styles change.
 - `src/client/admin.template.html` → `public/admin.html`. Single-file admin app (~1100 lines): login, album CRUD, upload/rename/delete photos, rebuild files, AI generate, QR codes for share links via `public/vendor/qr-code-styling.esm.js` (vendored, loaded with dynamic `import()`). Upload converts any image client-side (canvas) to JPEG 3000px + 1000px preview, sequentially per file. Save loops the PUT while `renameInProgress`.
-- `public/_headers` sets security headers + CSP for static assets. The gallery stylesheet comes from `https://plushka.se`, Turnstile from `challenges.cloudflare.com`; both are allow-listed. Adding any new external resource requires a CSP update.
+- `public/_headers` sets security headers + CSP for static assets, plus long immutable caching for `/styles.css` and `/vendor/*`. Allow-listed external origins: `challenges.cloudflare.com` (Turnstile script/frame/connect) and `plushka.se` (two CSS background images only). Adding any new external resource requires a CSP update.
 - Both templates contain the placeholder `__TURNSTILE_SITE_KEY__`. `scripts/build-assets.mjs` reads `TURNSTILE_SITE_KEY` from env or `.dev.vars` and substitutes it; unset yields `YOUR_TURNSTILE_SITE_KEY`, which the client treats as "Turnstile disabled". Wrangler runs the build automatically (`[build]` in `wrangler.toml`, watch on `src/client/`).
 - `public/index.html` and `public/admin.html` are gitignored (`public/.gitignore`). Edit the templates, never the outputs.
 
@@ -141,7 +144,7 @@ All under `/api/admin/`, Bearer session token required except `session`:
 
 Secrets (`.dev.vars` locally, `wrangler secret put` in prod): `ADMIN_TOKEN`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_SITE_KEY` (build-time only).
 
-Optional tuning (all read with defaults in code): `TURNSTILE_SOFT_THRESHOLD`, `TURNSTILE_SOFT_WINDOW_MS`, `TURNSTILE_SOFT_DO_TIMEOUT_MS` (default 80), `TURNSTILE_SOFT_PEEK_TIMEOUT_MS`, `TURNSTILE_SOFT_ADJUST_TIMEOUT_MS`, `TURNSTILE_VERIFY_TIMEOUT_MS` (default 5000), `TURNSTILE_BYPASS_COOKIE` (`0` disables), `TURNSTILE_BYPASS_COOKIE_NAME`, `TURNSTILE_BYPASS_COOKIE_TTL_MS`, `RATE_LIMIT_DISABLED`, `RATE_LIMIT_TIMEOUT_MS`, `ALBUM_INFO_TTL_MS`, `ALBUM_INFO_NOT_FOUND_TTL_MS`, `ALBUM_INFO_PARSE_ERROR_TTL_MS`, `ALBUM_RENAME_BATCH`, `AI_*` (see above).
+Optional tuning (all read with defaults in code): `TURNSTILE_SOFT_THRESHOLD`, `TURNSTILE_SOFT_WINDOW_MS`, `TURNSTILE_SOFT_DO_TIMEOUT_MS` (default 80), `TURNSTILE_SOFT_PEEK_TIMEOUT_MS`, `TURNSTILE_SOFT_ADJUST_TIMEOUT_MS`, `TURNSTILE_VERIFY_TIMEOUT_MS` (default 5000), `TURNSTILE_BYPASS_COOKIE` (`0` disables), `TURNSTILE_BYPASS_COOKIE_NAME`, `TURNSTILE_BYPASS_COOKIE_TTL_MS`, `RATE_LIMIT_DISABLED`, `RATE_LIMIT_TIMEOUT_MS`, `ALBUM_INFO_TTL_MS`, `ALBUM_INFO_NOT_FOUND_TTL_MS`, `ALBUM_INFO_PARSE_ERROR_TTL_MS`, `ALBUM_RENAME_BATCH`, `IMAGE_EDGE_MAX_AGE_S`, `AI_*` (see above).
 
 ## Local environment
 

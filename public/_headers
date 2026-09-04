@@ -2,11 +2,19 @@
 # API responses (/api/*, /img/*) set their own headers in the Worker.
 # Inline scripts / onclick handlers in the templates require 'unsafe-inline';
 # Turnstile needs challenges.cloudflare.com for script + frame.
-# The gallery loads its stylesheet (and possibly fonts/images) from plushka.se.
+# public/styles.css is a local copy of the plushka.se stylesheet; it still references two
+# background images on plushka.se (img-src).
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
   X-Robots-Tag: noindex, nofollow
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://plushka.se; font-src 'self' data: https://plushka.se; img-src 'self' data: blob: https://plushka.se; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://plushka.se; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# Versioned via ?v= query in the template, safe to cache long.
+/styles.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable

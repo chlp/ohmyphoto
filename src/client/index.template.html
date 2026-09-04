@@ -49,8 +49,31 @@
   <!-- Theme Color -->
   <meta name="theme-color" content="#2c3e50">
 
-  <!-- Styles from plushka.se -->
-  <link rel="stylesheet" href="https://plushka.se/styles.css?v=7b21f3c4">
+  <!--
+    Early album fetch: runs before the stylesheet can block parsing and before ui.js is
+    downloaded, so the API round-trip overlaps with CSS/JS loading. ui.js picks the
+    promise up from window.__ohmyphotoAlbumFetch (see fetchAlbumOnce).
+  -->
+  <script>
+    (function () {
+      try {
+        var parts = location.pathname.split('/').filter(Boolean);
+        var albumId = parts[0] ? decodeURIComponent(parts[0]) : '';
+        if (!albumId) return;
+        var secret = String(location.hash || '').replace(/^#/, '');
+        window.__ohmyphotoAlbumFetchKey = albumId + '#' + secret;
+        window.__ohmyphotoAlbumFetch = fetch('/api/album/' + encodeURIComponent(albumId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret: secret, turnstileToken: '' })
+        });
+        window.__ohmyphotoAlbumFetch.catch(function () {});
+      } catch (e) {}
+    })();
+  </script>
+
+  <!-- Local copy of the plushka.se stylesheet (see public/styles.css); bump ?v= when it changes -->
+  <link rel="stylesheet" href="/styles.css?v=7b21f3c4">
 
   <!-- Perf/diagnostics: page start -->
   <script>
