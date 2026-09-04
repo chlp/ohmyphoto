@@ -101,7 +101,7 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
     const __tTurnstile = __ompNowMs();
     const cookieEnabled = String(env.TURNSTILE_BYPASS_COOKIE || "1") !== "0";
     const cookieName = String(env.TURNSTILE_BYPASS_COOKIE_NAME || "ohmyphoto_human");
-    const ttlMs = Number(env.TURNSTILE_BYPASS_COOKIE_TTL_MS) || 7 * 24 * 60 * 1000;
+    const ttlMs = Number(env.TURNSTILE_BYPASS_COOKIE_TTL_MS) || 7 * 24 * 60 * 60 * 1000;
     const clientIp = getClientIp(request);
     const secure = new URL(request.url).protocol === "https:";
 
