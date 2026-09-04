@@ -13,9 +13,17 @@ node scripts/build-assets.mjs
 
 # Copy local album fixtures (./albums/**) into local R2 (local dev only)
 bash cp_albums_local.sh
+
+# Tests (vitest + @cloudflare/vitest-pool-workers, runs inside workerd)
+npm test
+npm run test:watch
 ```
 
-No `package.json`, no test suite, no lint config. Wrangler is invoked via `npx`. Related docs: `README.md` (feature overview), `USAGE.md` (Russian end-user guide for the admin UI).
+`npm install` first. No lint config. Related docs: `README.md` (feature overview), `USAGE.md` (Russian end-user guide for the admin UI).
+
+**Tests** live in `test/*.test.js`; config in `vitest.config.mjs`. They run against the real `wrangler.toml` bindings with local R2/DO/rate-limit simulators, `remoteBindings: false` (Workers AI is never called), `TURNSTILE_SECRET_KEY` blanked and `ALBUM_RENAME_BATCH=1` so the resumable-rename path is exercised. `test/worker.test.js` drives the full Worker via `SELF.fetch()`; add an end-to-end case there for any new admin route.
+
+Note: `wrangler dev` without a TTY fails on the remote AI binding; use `npx wrangler dev --local` for scripted smoke tests (AI then returns "AI generation failed", everything else works). `public/_headers` changes need a dev-server restart.
 
 ## Architecture
 
@@ -24,7 +32,7 @@ No `package.json`, no test suite, no lint config. Wrangler is invoked via `npx`.
 **Entry point**: `src/worker.js` — applies per-IP rate limiting (`src/utils/rateLimit.js`) then delegates to `src/router.js`. Also re-exports both Durable Object classes.
 
 **Routing** (`src/router.js`):
-- `/api/admin/*` → `src/api/admin.js` (checked first)
+- `/api/admin/*` → `src/api/admin/index.js` (checked first)
 - `POST /api/album/<albumId>` → `src/api/album.js`
 - `GET /img/<albumId>/(photos|preview)/<name>` → `src/api/image.js`
 - Anything else → 404 from the Worker. Static assets are served by the Assets binding *before* the Worker for all paths except `/api/*` and `/img/*` (`run_worker_first` in `wrangler.toml`), with SPA fallback so `/<albumId>` serves `index.html`.
@@ -33,7 +41,8 @@ No `package.json`, no test suite, no lint config. Wrangler is invoked via `npx`.
 | Binding | Type | Purpose |
 |---|---|---|
 | `BUCKET` | R2 (`ohmyphoto`) | Album data storage |
-| `RATE_LIMITER` | Durable Object `RateLimiterDO` | Per-IP rate limiting + Turnstile soft counters |
+| `RATE_LIMITER` | Durable Object `RateLimiterDO` | Admin-login rate limit (10-min window) + Turnstile soft counters; fallback for the native limiters |
+| `RL_ALBUM_API`, `RL_ADMIN_API`, `RL_IMG`, `RL_OTHER` | Rate Limiting (`[[ratelimits]]`) | Native per-IP limiters, 60s window, no DO round-trip |
 | `ALBUM_INFO` | Durable Object `AlbumInfoDO` | Persistent cache for `info.json` per album |
 | `AI` | Workers AI | Album ID / title generation |
 | `ASSETS` | Static | Serves `public/` |
@@ -59,7 +68,7 @@ albums/<albumId>/preview/<name>  # preview images (JPEG, same file name)
 
 **Album access**: Secret is passed in the URL fragment (`/<albumId>#<secret>`). `public/ui.js` reads `location.hash` and POSTs `{ secret, turnstileToken }` to `/api/album/<albumId>`. The Worker validates against `info.json` without logging or persisting the secret. Response includes `Server-Timing` (per-phase timings) and `X-OhMyPhoto-FileCount` headers, `Cache-Control: no-store`.
 
-**Signed image URLs**: The album response returns photo/preview URLs with `?s=<sig>` where `sig = sha256hex("albumId:name:secret")` (`src/utils/crypto.js:imageSig`). `src/api/image.js` accepts a signature matching *any* secret of the album, then streams from R2 with `Cache-Control: public, max-age=3600`. No Turnstile or rate-limit-heavy logic on the image path.
+**Signed image URLs**: The album response returns photo/preview URLs with `?s=<sig>` where `sig = HMAC-SHA256(key = secret, msg = "albumId:name")` hex (`src/utils/crypto.js:imageSig`). The admin UI computes the same HMAC client-side (`admin.template.html:imageSig`) — keep the two in sync. `src/api/image.js` checks the signature against *every* secret of the album with `timingSafeEqual` (no early exit), then streams from R2 with `Cache-Control: public, max-age=3600`.
 
 **Admin**: Two-step.
 1. `POST /api/admin/session` with `{ token: <ADMIN_TOKEN>, turnstileToken? }`. Turnstile is verified here if `TURNSTILE_SECRET_KEY` is set. On success returns an HMAC-SHA256 session token (signed with `ADMIN_TOKEN`, 7-day TTL, `src/utils/session.js`).
@@ -71,27 +80,34 @@ The admin UI stores the session token under `ohmyphoto_admin_session` in `localS
 
 ## Rate limiting
 
-`src/utils/rateLimit.js` runs before routing. Buckets keyed `"<bucket>:<ip>"` in `RateLimiterDO`:
+`src/utils/rateLimit.js` runs before routing. Native Cloudflare Rate Limiting bindings only support 10s/60s periods, so long windows stay on the Durable Object:
 
-| Path | Bucket | Limit |
-|---|---|---|
-| `POST /api/admin/session` | `admin_session` | 10 / 10 min |
-| `/api/admin/*` | `admin_api` | 300 / 5 min |
-| `/api/album/*` | `album_api` | 120 / 1 min |
-| `/img/*` | `img` | 1200 / 5 min |
-| other | `other` | 600 / 5 min |
+| Path | Bucket | Mechanism | Limit |
+|---|---|---|---|
+| `POST /api/admin/session` | `admin_session` | `RateLimiterDO` | 10 / 10 min |
+| `/api/admin/*` | `admin_api` | `RL_ADMIN_API` | 60 / min |
+| `/api/album/*` | `album_api` | `RL_ALBUM_API` | 120 / min |
+| `/img/*` | `img` | `RL_IMG` | 300 / min |
+| other | `other` | `RL_OTHER` | 120 / min |
 
-Returns 429 with `RateLimit-*` and `Retry-After` headers. Disabled with `RATE_LIMIT_DISABLED=1`. Fail-open on DO timeout (`RATE_LIMIT_TIMEOUT_MS`, default 500).
+Native limits are edited in `wrangler.toml`; the `fallback` values in `rateLimit.js` mirror them for environments without the bindings (DO path, keyed `"<bucket>:<ip>"`). Returns 429 with `RateLimit-*` and `Retry-After`. Disabled with `RATE_LIMIT_DISABLED=1`. Always fail-open on errors/timeouts (`RATE_LIMIT_TIMEOUT_MS`, default 500, DO path only).
 
 ## Durable Objects
 
 **`RateLimiterDO`** (`src/durable/rateLimiter.js`): Stores `{ count, resetAtMs }`. Actions over POST JSON: `check` (default, `{ limit, windowMs }`), `peek`, `adjust` (`{ delta, windowMs }`), `reset`. Turnstile soft counters use instance name `turnstile_soft:<ip>`.
 
-**`AlbumInfoDO`** (`src/durable/albumInfo.js`): Instance name `album:<albumId>`. Caches parsed `info.json` + extracted secrets (default TTL 7 days via `ALBUM_INFO_TTL_MS`; parse errors cached for `ALBUM_INFO_PARSE_ERROR_TTL_MS`, default 60s; 404s cached for the full TTL). Actions: `get`, `invalidate`. **Every admin write that touches an album must call `invalidateAlbumCache()`** (`src/utils/album.js`), including both old and new IDs on rename. `putInfoJson()` in `admin.js` does this automatically.
+**`AlbumInfoDO`** (`src/durable/albumInfo.js`): Instance name `album:<albumId>`. Caches parsed `info.json` + extracted secrets. TTLs: hits 7 days (`ALBUM_INFO_TTL_MS`), 404s 1 hour (`ALBUM_INFO_NOT_FOUND_TTL_MS`), parse errors 60s (`ALBUM_INFO_PARSE_ERROR_TTL_MS`). Actions: `get`, `invalidate`. Both DOs keep an in-memory memo (`this.mem`) in front of storage — in tests use a fresh albumId per test. **Every admin write that touches an album must call `invalidateAlbumCache()`** (`src/utils/album.js`), including both old and new IDs on rename. `putInfoJson()` in `src/api/admin/infoStore.js` does this automatically.
 
 DO calls from the album/rate-limit paths use `Promise.race()` with a timeout and fail-open. `getAlbumInfoWithSecrets()` has no timeout but falls back to direct R2 read if the DO errors or returns an unexpected shape.
 
-## Admin API (`src/api/admin.js`)
+## Admin API (`src/api/admin/`)
+
+- `index.js` — route table (`ROUTES`: method + regex + handler, `public: true` skips auth). Capture groups arrive URL-decoded as `params`. Unknown paths still require auth before 404.
+- `auth.js` — `authorizeAdmin`, session exchange.
+- `albums.js` — list/create/update(+rename)/delete.
+- `files.js` — upload/rename/delete photos, raw image, rebuild-files.
+- `ai.js` — Workers AI ID/title generation.
+- `infoStore.js` — `info.json` read/write helpers (`putInfoJson` invalidates the DO cache), `listAlbumIds` (R2 delimiter listing, never scans photo objects), `files` list manipulation.
 
 All under `/api/admin/`, Bearer session token required except `session`:
 
@@ -100,23 +116,24 @@ All under `/api/admin/`, Bearer session token required except `session`:
 | `POST session` | Exchange `ADMIN_TOKEN` for session token |
 | `GET albums` | List `{ albumId, title, secretCount, secrets }` (scans `albums/*/info.json`) |
 | `POST album` | Create `{ albumId, title?, secret? }`; secret auto-generated as 6 hex chars if omitted; 409 if exists |
-| `PUT album/<id>` | Update `{ title?, secrets?: string[], newAlbumId? }`; rename copies every key under the prefix then deletes the old ones (batches of 100) |
+| `PUT album/<id>` | Update `{ title?, secrets?: string[], newAlbumId? }`. Rename moves objects one by one (copy + delete), at most `ALBUM_RENAME_BATCH` (default 200) per request; while objects remain it returns `{ renameInProgress: true, moved, remaining }` and the client repeats the same PUT. New `info.json` is written last and old one deleted only then, so an interrupted rename is resumable; destination is "taken" only if its `info.json` exists |
 | `DELETE album/<id>` | Delete all keys under `albums/<id>/` |
 | `GET album/<id>/files` | Files from `info.json` with admin raw URLs |
 | `GET album/<id>/raw/(photos\|preview)/<name>` | Stream image without signature (`no-store`) |
-| `POST album/<id>/file` | `multipart/form-data`: `photo`, `preview` (both JPEG), optional `name`, `overwrite=1`; 409 if exists without overwrite |
+| `POST album/<id>/file` | `multipart/form-data`: `photo`, `preview` (both must start with JPEG magic `FF D8 FF`), optional `name`, `overwrite=1`; 409 if exists without overwrite. Blobs are streamed to R2, not buffered |
 | `PUT album/<id>/file/<name>` | Rename `{ newName }` (copies photo+preview, deletes old) |
 | `DELETE album/<id>/file/<name>` | Delete photo + preview, remove from `files` |
 | `POST album/<id>/rebuild-files` | Rebuild `files` from R2 `photos/` listing; reports added/removed/missing previews |
 | `POST albums/rebuild-files` | Same for all albums |
 | `POST generate-album-id` | Workers AI: `{ description }` → `{ albumId, title }` |
 
-**AI generation**: Album ID = UTC date prefix `YYYY.MM.DD-` + 3–4 word lowercase kebab slug (retries once with a stricter prompt). Title is best-effort (empty string on failure). Models/knobs via env: `AI_ALBUM_ID_MODEL` (default `@cf/meta/llama-2-7b-chat-int8`, set in `wrangler.toml [vars]`), `AI_ALBUM_ID_MAX_TOKENS`, `AI_ALBUM_ID_TEMPERATURE`, `AI_ALBUM_ID_TOP_P`, and `AI_ALBUM_TITLE_*` equivalents (fall back to the ID model).
+**AI generation**: Album ID = UTC date prefix `YYYY.MM.DD-` + 3–4 word lowercase kebab slug (retries once with a stricter prompt). Title is generated in parallel and is best-effort (empty string on failure). Models/knobs via env: `AI_ALBUM_ID_MODEL` (default `@cf/meta/llama-2-7b-chat-int8`, set in `wrangler.toml [vars]`), `AI_ALBUM_ID_MAX_TOKENS`, `AI_ALBUM_ID_TEMPERATURE`, `AI_ALBUM_ID_TOP_P`, and `AI_ALBUM_TITLE_*` equivalents (fall back to the ID model).
 
 ## Client
 
 - `src/client/index.template.html` → `public/index.html` (gallery shell: grid, lightbox, Turnstile widgets). Gallery logic lives in `public/ui.js` (tracked in git, **not** generated). Images use `loading="lazy"`.
-- `src/client/admin.template.html` → `public/admin.html`. Single-file admin app (~1100 lines): login, album CRUD, upload/rename/delete photos, rebuild files, AI generate, QR codes for share links via `public/vendor/qr-code-styling.esm.js` (vendored, loaded with dynamic `import()`).
+- `src/client/admin.template.html` → `public/admin.html`. Single-file admin app (~1100 lines): login, album CRUD, upload/rename/delete photos, rebuild files, AI generate, QR codes for share links via `public/vendor/qr-code-styling.esm.js` (vendored, loaded with dynamic `import()`). Upload converts any image client-side (canvas) to JPEG 3000px + 1000px preview, sequentially per file. Save loops the PUT while `renameInProgress`.
+- `public/_headers` sets security headers + CSP for static assets. The gallery stylesheet comes from `https://plushka.se`, Turnstile from `challenges.cloudflare.com`; both are allow-listed. Adding any new external resource requires a CSP update.
 - Both templates contain the placeholder `__TURNSTILE_SITE_KEY__`. `scripts/build-assets.mjs` reads `TURNSTILE_SITE_KEY` from env or `.dev.vars` and substitutes it; unset yields `YOUR_TURNSTILE_SITE_KEY`, which the client treats as "Turnstile disabled". Wrangler runs the build automatically (`[build]` in `wrangler.toml`, watch on `src/client/`).
 - `public/index.html` and `public/admin.html` are gitignored (`public/.gitignore`). Edit the templates, never the outputs.
 
@@ -124,11 +141,11 @@ All under `/api/admin/`, Bearer session token required except `session`:
 
 Secrets (`.dev.vars` locally, `wrangler secret put` in prod): `ADMIN_TOKEN`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_SITE_KEY` (build-time only).
 
-Optional tuning (all read with defaults in code): `TURNSTILE_SOFT_THRESHOLD`, `TURNSTILE_SOFT_WINDOW_MS`, `TURNSTILE_SOFT_DO_TIMEOUT_MS` (default 80), `TURNSTILE_SOFT_PEEK_TIMEOUT_MS`, `TURNSTILE_SOFT_ADJUST_TIMEOUT_MS`, `TURNSTILE_VERIFY_TIMEOUT_MS` (default 5000), `TURNSTILE_BYPASS_COOKIE` (`0` disables), `TURNSTILE_BYPASS_COOKIE_NAME`, `TURNSTILE_BYPASS_COOKIE_TTL_MS`, `RATE_LIMIT_DISABLED`, `RATE_LIMIT_TIMEOUT_MS`, `ALBUM_INFO_TTL_MS`, `ALBUM_INFO_PARSE_ERROR_TTL_MS`, `AI_*` (see above).
+Optional tuning (all read with defaults in code): `TURNSTILE_SOFT_THRESHOLD`, `TURNSTILE_SOFT_WINDOW_MS`, `TURNSTILE_SOFT_DO_TIMEOUT_MS` (default 80), `TURNSTILE_SOFT_PEEK_TIMEOUT_MS`, `TURNSTILE_SOFT_ADJUST_TIMEOUT_MS`, `TURNSTILE_VERIFY_TIMEOUT_MS` (default 5000), `TURNSTILE_BYPASS_COOKIE` (`0` disables), `TURNSTILE_BYPASS_COOKIE_NAME`, `TURNSTILE_BYPASS_COOKIE_TTL_MS`, `RATE_LIMIT_DISABLED`, `RATE_LIMIT_TIMEOUT_MS`, `ALBUM_INFO_TTL_MS`, `ALBUM_INFO_NOT_FOUND_TTL_MS`, `ALBUM_INFO_PARSE_ERROR_TTL_MS`, `ALBUM_RENAME_BATCH`, `AI_*` (see above).
 
 ## Local environment
 
-`.dev.vars` (not committed):
+`.dev.vars` holds local-only values (prod uses Worker secrets set via `wrangler secret put`):
 ```
 TURNSTILE_SECRET_KEY=...
 TURNSTILE_SITE_KEY=...
@@ -140,6 +157,7 @@ Use `ADMIN_TOKEN=dev-admin` locally. Turnstile test keys (`1x000...`) skip real 
 ## Conventions
 
 - Small pure helpers in `src/utils/*`; handlers in `src/api/*`; each DO in `src/durable/*` with its protocol documented in a JSDoc header.
-- Responses go through `src/utils/response.js` (`json`, `text`, `notFound`, `forbidden`). Admin JSON responses use `Cache-Control: no-store`.
-- Anything touching secrets or tokens uses `timingSafeEqual` from `src/utils/crypto.js`.
+- Responses go through `src/utils/response.js` (`json`, `jsonNoStore`, `text`, `notFound`, `forbidden`, `badRequest`, `conflict`). Admin handlers return `jsonNoStore`.
+- Anything touching secrets, tokens or signatures uses `timingSafeEqual` from `src/utils/crypto.js`; HMAC helpers live there too.
+- R2 existence checks use `head()`, not `get()`.
 - Observability is enabled in `wrangler.toml` (logs persisted, 100% sampling); traces disabled.

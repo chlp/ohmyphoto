@@ -1,4 +1,4 @@
-import { imageSig } from '../utils/crypto.js';
+import { imageSig, timingSafeEqual } from '../utils/crypto.js';
 import { getAlbumInfoWithSecrets } from '../utils/album.js';
 import { forbidden, notFound } from '../utils/response.js';
 import { isValidAlbumId, isValidPhotoFileName } from '../utils/validate.js';
@@ -38,13 +38,11 @@ export async function handleImageRequest(request, env, albumId, kind, name) {
     return forbidden();
   }
 
+  // Check every secret (no early exit) so timing does not reveal which one matched.
   let ok = false;
   for (const secret of secrets) {
     const expected = await imageSig(albumId, name, secret);
-    if (expected === sig) {
-      ok = true;
-      break;
-    }
+    if (timingSafeEqual(expected, sig)) ok = true;
   }
 
   if (!ok) {

@@ -16,6 +16,17 @@ export function json(obj, status = 200, extraHeaders = {}) {
 }
 
 /**
+ * JSON response that must never be cached (admin/API mutations).
+ * @param {Object} obj
+ * @param {number} status
+ * @param {Object} extraHeaders
+ * @returns {Response}
+ */
+export function jsonNoStore(obj = {}, status = 200, extraHeaders = {}) {
+  return json(obj, status, { "Cache-Control": "no-store", ...extraHeaders });
+}
+
+/**
  * Create plain-text response.
  * @param {string} body
  * @param {number} status
@@ -40,3 +51,10 @@ export function forbidden(extraHeaders = {}) {
   return text("Forbidden", 403, extraHeaders);
 }
 
+export function badRequest(msg = "Bad request") {
+  return jsonNoStore({ error: msg }, 400);
+}
+
+export function conflict(msg = "Conflict") {
+  return jsonNoStore({ error: msg }, 409);
+}

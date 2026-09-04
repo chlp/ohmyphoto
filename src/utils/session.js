@@ -1,4 +1,4 @@
-import { sha256Hex, timingSafeEqual } from "./crypto.js";
+import { hmacSha256Bytes, sha256Hex, timingSafeEqual } from "./crypto.js";
 
 function base64UrlEncode(bytes) {
   let bin = "";
@@ -28,20 +28,6 @@ function safeJsonParse(str) {
   } catch {
     return null;
   }
-}
-
-async function hmacSha256Bytes(keyString, messageString) {
-  const keyData = new TextEncoder().encode(String(keyString));
-  const msgData = new TextEncoder().encode(String(messageString));
-  const key = await crypto.subtle.importKey(
-    "raw",
-    keyData,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, msgData);
-  return new Uint8Array(sig);
 }
 
 /**

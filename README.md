@@ -27,7 +27,11 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
   - `TURNSTILE_SOFT_THRESHOLD` (default: `100`)
   - `TURNSTILE_SOFT_WINDOW_MS` (default: `86400000` i.e. 24h)
   - `TURNSTILE_SOFT_DO_TIMEOUT_MS` (default: `300`) – best-effort timeout for the DO calls (fail-open)
-- **Signed image URLs**: photo/preview URLs include a signature (`?s=...`) derived from the album secret, so the browser can fetch images without re-sending the secret (and without re-running Turnstile per image).
+- **Signed image URLs**: photo/preview URLs include a signature (`?s=...`, HMAC-SHA256 keyed by the album secret), so the browser can fetch images without re-sending the secret (and without re-running Turnstile per image).
+
+## Rate limiting
+
+Per-IP limits use Cloudflare's native Rate Limiting bindings (`[[ratelimits]]` in `wrangler.toml`) for the album, image and admin APIs, and a Durable Object for the admin login endpoint (10 attempts / 10 minutes). Set `RATE_LIMIT_DISABLED=1` to turn it off locally.
 
 ## Admin (create/update/rename/delete albums)
 
@@ -38,5 +42,9 @@ Admin API is protected with `Authorization: Bearer <ADMIN_TOKEN>` (set `ADMIN_TO
 ## Local run
 
 ```bash
-npx wrangler dev
+npm install
+npx wrangler dev          # http://127.0.0.1:8787
+npm test                  # vitest inside workerd (R2/DO/rate-limit simulators)
 ```
+
+Static assets get security headers and a CSP from `public/_headers`.

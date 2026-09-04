@@ -624,17 +624,14 @@
       albumsCardEl.classList.remove('hidden');
     }
 
-    async function sha256Hex(input) {
-      const data = new TextEncoder().encode(String(input));
-      const hash = await crypto.subtle.digest("SHA-256", data);
-      const bytes = new Uint8Array(hash);
-      let hex = "";
-      for (const b of bytes) hex += b.toString(16).padStart(2, "0");
-      return hex;
-    }
-
+    // Must match src/utils/crypto.js:imageSig — HMAC-SHA256(key = secret, msg = "albumId:name"), hex.
     async function imageSig(albumId, name, secret) {
-      return sha256Hex(`${albumId}:${name}:${secret}`);
+      const enc = new TextEncoder();
+      const key = await crypto.subtle.importKey('raw', enc.encode(String(secret)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const sig = await crypto.subtle.sign('HMAC', key, enc.encode(`${albumId}:${name}`));
+      let hex = '';
+      for (const b of new Uint8Array(sig)) hex += b.toString(16).padStart(2, '0');
+      return hex;
     }
 
     function normalizeUploadName(filename) {
@@ -947,14 +944,25 @@
           // Always send secrets (allows clearing); textarea is prefilled from server.
           payload.secrets = parseSecrets(secretsArea.value);
           if (renameInput.value.trim()) payload.newAlbumId = renameInput.value.trim();
-          const r = await api(`/api/admin/album/${encodeURIComponent(a.albumId)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          if (!r.ok) {
-            alert(`Save failed: ${r.status}`);
-            return;
+          // Rename moves objects in batches; repeat the same PUT until the server reports completion.
+          saveBtn.disabled = true;
+          try {
+            for (;;) {
+              const r = await api(`/api/admin/album/${encodeURIComponent(a.albumId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              if (!r.ok) {
+                alert(`Save failed: ${r.status}`);
+                return;
+              }
+              const data = await r.json().catch(() => ({}));
+              if (!data.renameInProgress) break;
+              statusEl.textContent = `Renaming "${a.albumId}": ${data.remaining} object(s) left...`;
+            }
+          } finally {
+            saveBtn.disabled = false;
           }
           await refresh();
         };

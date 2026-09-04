@@ -6,7 +6,44 @@
 export async function sha256Hex(input) {
   const data = new TextEncoder().encode(String(input));
   const hash = await crypto.subtle.digest("SHA-256", data);
-  const bytes = new Uint8Array(hash);
+  return bytesToHex(new Uint8Array(hash));
+}
+
+/**
+ * HMAC-SHA256 over a string message with a string key.
+ * @param {string} keyString
+ * @param {string} messageString
+ * @returns {Promise<Uint8Array>}
+ */
+export async function hmacSha256Bytes(keyString, messageString) {
+  const keyData = new TextEncoder().encode(String(keyString));
+  const msgData = new TextEncoder().encode(String(messageString));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, msgData);
+  return new Uint8Array(sig);
+}
+
+/**
+ * HMAC-SHA256 as lowercase hex.
+ * @param {string} keyString
+ * @param {string} messageString
+ * @returns {Promise<string>}
+ */
+export async function hmacSha256Hex(keyString, messageString) {
+  return bytesToHex(await hmacSha256Bytes(keyString, messageString));
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string} lowercase hex
+ */
+export function bytesToHex(bytes) {
   let hex = "";
   for (const b of bytes) hex += b.toString(16).padStart(2, "0");
   return hex;
@@ -27,14 +64,13 @@ export function timingSafeEqual(a, b) {
 }
 
 /**
- * Signature for image URLs: sha256hex(`${albumId}:${name}:${secret}`)
+ * Signature for image URLs: HMAC-SHA256(key = secret, message = `${albumId}:${name}`), hex.
+ * The admin UI computes the same value client-side (see admin.template.html).
  * @param {string} albumId
  * @param {string} name
  * @param {string} secret
  * @returns {Promise<string>}
  */
 export async function imageSig(albumId, name, secret) {
-  return sha256Hex(`${albumId}:${name}:${secret}`);
+  return hmacSha256Hex(secret, `${albumId}:${name}`);
 }
-
-

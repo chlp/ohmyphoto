@@ -1,6 +1,6 @@
 import { handleAlbumRequest } from './api/album.js';
 import { handleImageRequest } from './api/image.js';
-import { handleAdminRequest } from './api/admin.js';
+import { handleAdminRequest } from './api/admin/index.js';
 import { notFound } from './utils/response.js';
 
 /**

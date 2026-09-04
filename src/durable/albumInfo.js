@@ -81,7 +81,11 @@ export class AlbumInfoDO {
       Number(this.env.ALBUM_INFO_TTL_MS) ||
       7 * 24 * 60 * 60 * 1000;
 
-    // If we had a parse error, don't pin it for the full ttl.
+    // Negative results get shorter TTLs: a missing album may be created any moment
+    // (e.g. uploaded directly to R2), and a parse error is usually fixed quickly.
+    const notFoundTtlMs =
+      Number(this.env.ALBUM_INFO_NOT_FOUND_TTL_MS) ||
+      60 * 60 * 1000;
     const parseErrorTtlMs =
       Number(this.env.ALBUM_INFO_PARSE_ERROR_TTL_MS) ||
       60 * 1000;
@@ -91,7 +95,8 @@ export class AlbumInfoDO {
 
     if (v && v.albumId === albumId && Number.isFinite(v.fetchedAtMs)) {
       const ageMs = now - v.fetchedAtMs;
-      const effectiveTtlMs = v.ok === false && v.status === 500 ? parseErrorTtlMs : ttlMs;
+      let effectiveTtlMs = ttlMs;
+      if (v.ok === false) effectiveTtlMs = v.status === 404 ? notFoundTtlMs : parseErrorTtlMs;
       if (ageMs >= 0 && ageMs < effectiveTtlMs) {
         return json({ ...v, cached: true }, 200, { 'Cache-Control': 'no-store' });
       }
