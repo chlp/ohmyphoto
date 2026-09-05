@@ -112,9 +112,21 @@
     .status-card p { margin: 10px 0; }
     .status-muted { opacity: 0.75; font-size: 14px; }
 
-    /* Album toolbar: "download all as ZIP" (built client-side, see ui.js) */
-    .album-toolbar { display: none; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 18px; }
+    /* Header: album title with the ZIP toolbar right under it (toolbar built client-side, see ui.js) */
+    .header-brand { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+    /* Brand block is two lines tall now; keep the nav on the title line instead of vertically centred */
+    .header .header-container { align-items: flex-start; }
+    .header .nav-menu { margin-top: 4px; }
+    .header-brand .logo { display: block; line-height: 1.2; }
+    .album-toolbar { display: none; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 8px 0 0; }
     .album-toolbar[data-visible="1"] { display: flex; }
+    .album-toolbar .album-btn { padding: 6px 12px; font-size: 14px; }
+    @media (max-width: 768px) {
+      .header .header-container { align-items: center; }
+      .header .nav-menu { margin-top: 0; }
+      .header-brand { align-items: center; text-align: center; }
+      .album-toolbar { justify-content: center; }
+    }
     /* Buttons follow the site palette (.cta-link in styles.css): light fill, #333 border, dark on hover */
     .album-btn, .status-card .access-btn {
       appearance: none; border: 1px solid #333; border-radius: 4px;
@@ -171,8 +183,11 @@
   <header class="header">
     <div class="header-container">
       <!-- Do not use hash navigation (we use #secret) -->
-      <a id="logoLink" href="#" class="logo" aria-label="Home"><span id="title">OhMyPhoto</span></a>
-      <h2 class="header-page-title"></h2>
+      <div class="header-brand">
+        <a id="logoLink" href="#" class="logo" aria-label="Home"><span id="title">OhMyPhoto</span></a>
+        <h2 class="header-page-title"></h2>
+        <div id="toolbar" class="album-toolbar"></div>
+      </div>
       <nav>
         <ul class="nav-menu">
           <li><a href="https://plushka.se" target="_blank" rel="noreferrer">Mary Rytikova Photography</a></li>
@@ -185,7 +200,6 @@
     <div class="container">
       <div id="page-content">
         <div id="status" style="padding:16px 0;"></div>
-        <div id="toolbar" class="album-toolbar"></div>
         <div id="grid" class="gallery-grid"></div>
       </div>
     </div>
