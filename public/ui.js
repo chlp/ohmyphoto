@@ -1,3 +1,5 @@
+import { createZipWriter } from './zip.js';
+
 (() => {
   'use strict';
 
@@ -23,49 +25,142 @@
     return parts[0] || '';
   }
 
-  // Lightbox state
+  // ---------------------------------------------------------------------------
+  // Lightbox: buttons + keyboard (Esc, arrows) + horizontal swipe, counter, file name,
+  // download link, neighbours preloaded. `items` = [{ name, fullSrc }].
+  // ---------------------------------------------------------------------------
   let __lightboxIndex = -1;
-  let __lightboxItems = []; // { name, fullSrc }
+  let __lightboxItems = [];
+  let __lightboxReturnFocus = null;
+  const __preloaded = new Set();
+
+  const lbEl = () => document.getElementById('lightbox');
+  const displayName = (name) => String(name || '').replace(/\.jpe?g$/i, '');
+
+  function preloadImage(idx) {
+    const it = __lightboxItems[idx];
+    if (!it || !it.fullSrc || __preloaded.has(it.fullSrc)) return;
+    __preloaded.add(it.fullSrc);
+    const im = new Image();
+    im.decoding = 'async';
+    im.src = it.fullSrc;
+  }
+
+  function showLightboxIndex(i) {
+    const it = __lightboxItems[i];
+    const img = document.getElementById('lightbox-img');
+    if (!it || !img) return;
+    __lightboxIndex = i;
+    img.src = it.fullSrc || '';
+    img.alt = displayName(it.name);
+    const counter = document.getElementById('lightbox-counter');
+    if (counter) counter.textContent = `${i + 1} / ${__lightboxItems.length}`;
+    const nameEl = document.getElementById('lightbox-name');
+    if (nameEl) nameEl.textContent = it.name || '';
+    const dl = document.getElementById('lightbox-download');
+    if (dl) {
+      dl.href = it.fullSrc || '#';
+      dl.setAttribute('download', it.name || 'photo.jpg');
+      dl.setAttribute('aria-label', `Download ${it.name || 'photo'}`);
+    }
+    const n = __lightboxItems.length;
+    if (n > 1) {
+      preloadImage((i + 1) % n);
+      preloadImage((i - 1 + n) % n);
+    }
+  }
 
   function openLightboxByIndex(idx) {
     if (!Array.isArray(__lightboxItems) || __lightboxItems.length === 0) return;
     const i = Number(idx);
     if (!Number.isFinite(i) || i < 0 || i >= __lightboxItems.length) return;
-    __lightboxIndex = i;
-    const lb = document.getElementById('lightbox');
-    const img = document.getElementById('lightbox-img');
-    if (!lb || !img) return;
-    img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
+    const lb = lbEl();
+    if (!lb) return;
+    __lightboxReturnFocus = document.activeElement;
+    showLightboxIndex(i);
     lb.style.display = 'block';
     document.body.style.overflow = 'hidden';
+    const closeBtn = document.getElementById('lightbox-close');
+    if (closeBtn) closeBtn.focus({ preventScroll: true });
   }
 
   function closeLightbox() {
-    const lb = document.getElementById('lightbox');
+    const lb = lbEl();
     if (lb) lb.style.display = 'none';
     document.body.style.overflow = 'auto';
     __lightboxIndex = -1;
     const img = document.getElementById('lightbox-img');
     if (img) img.src = '';
+    const f = __lightboxReturnFocus;
+    __lightboxReturnFocus = null;
+    if (f && typeof f.focus === 'function' && document.contains(f)) f.focus({ preventScroll: true });
   }
 
   function previousImage(e) {
     if (e && e.stopPropagation) e.stopPropagation();
     if (!__lightboxItems.length) return;
-    __lightboxIndex = (__lightboxIndex - 1 + __lightboxItems.length) % __lightboxItems.length;
-    const img = document.getElementById('lightbox-img');
-    if (img) img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
+    showLightboxIndex((__lightboxIndex - 1 + __lightboxItems.length) % __lightboxItems.length);
   }
 
   function nextImage(e) {
     if (e && e.stopPropagation) e.stopPropagation();
     if (!__lightboxItems.length) return;
-    __lightboxIndex = (__lightboxIndex + 1) % __lightboxItems.length;
-    const img = document.getElementById('lightbox-img');
-    if (img) img.src = __lightboxItems[__lightboxIndex].fullSrc || '';
+    showLightboxIndex((__lightboxIndex + 1) % __lightboxItems.length);
   }
 
-  // Expose for onclick handlers in HTML
+  function isLightboxOpen() {
+    const lb = lbEl();
+    return Boolean(lb && lb.style.display === 'block');
+  }
+
+  /** Wire buttons, overlay click, keyboard and swipe once; safe to call before items exist. */
+  function initLightbox() {
+    const lb = lbEl();
+    if (!lb || lb.dataset.wired === '1') return;
+    lb.dataset.wired = '1';
+    const closeBtn = document.getElementById('lightbox-close');
+    const prevBtn = document.getElementById('lightbox-prev');
+    const nextBtn = document.getElementById('lightbox-next');
+    if (closeBtn) closeBtn.onclick = (e) => { e.stopPropagation(); closeLightbox(); };
+    if (prevBtn) prevBtn.onclick = previousImage;
+    if (nextBtn) nextBtn.onclick = nextImage;
+    // close when clicking the backdrop or the empty area around the image (not the image/controls)
+    lb.addEventListener('click', (e) => {
+      const t = e.target;
+      if (t === lb || (t && t.classList && t.classList.contains('lightbox-content'))) closeLightbox();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (!isLightboxOpen()) return;
+      if (e.key === 'Escape') closeLightbox();
+      else if (e.key === 'ArrowLeft') previousImage(e);
+      else if (e.key === 'ArrowRight') nextImage(e);
+      else if (e.key === 'Home') showLightboxIndex(0);
+      else if (e.key === 'End') showLightboxIndex(__lightboxItems.length - 1);
+    });
+    // horizontal swipe (touch / pen / mouse drag); ignored while the user pinch-zooms (2 pointers)
+    let swipe = null;
+    let pointers = 0;
+    lb.addEventListener('pointerdown', (e) => {
+      pointers += 1;
+      if (pointers > 1 || (e.target && e.target.closest && e.target.closest('button, a'))) { swipe = null; return; }
+      swipe = { x: e.clientX, y: e.clientY, t: Date.now() };
+    });
+    const endPointer = (e) => {
+      pointers = Math.max(0, pointers - 1);
+      if (!swipe || e.type === 'pointercancel') { swipe = null; return; }
+      const dx = e.clientX - swipe.x;
+      const dy = e.clientY - swipe.y;
+      const fast = Date.now() - swipe.t < 600;
+      swipe = null;
+      if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      if (!fast && Math.abs(dx) < 96) return;
+      if (dx < 0) nextImage(); else previousImage();
+    };
+    lb.addEventListener('pointerup', endPointer);
+    lb.addEventListener('pointercancel', endPointer);
+  }
+
+  // Kept on window for backwards compatibility with any external markup.
   window.closeLightbox = closeLightbox;
   window.previousImage = previousImage;
   window.nextImage = nextImage;
@@ -92,131 +187,6 @@
   // Whether the feature is available for an album is decided by the server (`data.zip`,
   // see src/utils/albumZip.js) and only displayed here.
   // ---------------------------------------------------------------------------
-
-  const CRC32_TABLE = (() => {
-    const t = new Uint32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      t[n] = c >>> 0;
-    }
-    return t;
-  })();
-
-  // Incremental CRC-32 (IEEE): start with 0, feed chunks, use the last return value.
-  function crc32Update(crc, bytes) {
-    let c = (crc ^ 0xffffffff) >>> 0;
-    for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  }
-
-  function dosDateTime(d) {
-    const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
-    const date = ((Math.max(1980, d.getFullYear()) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
-    return { time: time & 0xffff, date: date & 0xffff };
-  }
-
-  /**
-   * Streaming ZIP writer: method STORE, general-purpose flag bits 3 (data descriptor) + 11 (UTF-8).
-   * Sizes < 4 GiB and < 65535 entries (guaranteed by the server-side gate), so no ZIP64.
-   * `sink.write(Uint8Array)` may return a promise.
-   */
-  function createZipWriter(sink) {
-    const textEncoder = new TextEncoder();
-    const central = [];
-    let offset = 0;
-    let current = null;
-
-    const write = async (bytes) => {
-      await sink.write(bytes);
-      offset += bytes.length;
-    };
-
-    const u16 = (view, pos, v) => view.setUint16(pos, v & 0xffff, true);
-    const u32 = (view, pos, v) => view.setUint32(pos, v >>> 0, true);
-
-    return {
-      async beginFile(name) {
-        if (current) throw new Error('zip: previous file not finished');
-        const nameBytes = textEncoder.encode(name);
-        const { time, date } = dosDateTime(new Date());
-        const header = new Uint8Array(30 + nameBytes.length);
-        const v = new DataView(header.buffer);
-        u32(v, 0, 0x04034b50); // local file header signature
-        u16(v, 4, 20);         // version needed to extract (2.0)
-        u16(v, 6, 0x0808);     // flags: data descriptor + UTF-8 names
-        u16(v, 8, 0);          // method: STORE
-        u16(v, 10, time);
-        u16(v, 12, date);
-        u32(v, 14, 0);         // crc-32 (in data descriptor)
-        u32(v, 18, 0);         // compressed size (in data descriptor)
-        u32(v, 22, 0);         // uncompressed size (in data descriptor)
-        u16(v, 26, nameBytes.length);
-        u16(v, 28, 0);         // extra field length
-        header.set(nameBytes, 30);
-        current = { nameBytes, time, date, headerOffset: offset, crc: 0, size: 0 };
-        await write(header);
-      },
-      async writeChunk(chunk) {
-        if (!current) throw new Error('zip: no open file');
-        current.crc = crc32Update(current.crc, chunk);
-        current.size += chunk.length;
-        await write(chunk);
-      },
-      async endFile() {
-        if (!current) throw new Error('zip: no open file');
-        const dd = new Uint8Array(16);
-        const v = new DataView(dd.buffer);
-        u32(v, 0, 0x08074b50); // data descriptor signature
-        u32(v, 4, current.crc);
-        u32(v, 8, current.size);
-        u32(v, 12, current.size);
-        await write(dd);
-        central.push(current);
-        current = null;
-      },
-      async finish() {
-        if (current) throw new Error('zip: file still open');
-        const cdOffset = offset;
-        for (const e of central) {
-          const rec = new Uint8Array(46 + e.nameBytes.length);
-          const v = new DataView(rec.buffer);
-          u32(v, 0, 0x02014b50); // central directory header signature
-          u16(v, 4, 20);         // version made by
-          u16(v, 6, 20);         // version needed
-          u16(v, 8, 0x0808);     // flags
-          u16(v, 10, 0);         // method
-          u16(v, 12, e.time);
-          u16(v, 14, e.date);
-          u32(v, 16, e.crc);
-          u32(v, 20, e.size);
-          u32(v, 24, e.size);
-          u16(v, 28, e.nameBytes.length);
-          u16(v, 30, 0);         // extra length
-          u16(v, 32, 0);         // comment length
-          u16(v, 34, 0);         // disk number start
-          u16(v, 36, 0);         // internal attributes
-          u32(v, 38, 0);         // external attributes
-          u32(v, 42, e.headerOffset);
-          rec.set(e.nameBytes, 46);
-          await write(rec);
-        }
-        const cdSize = offset - cdOffset;
-        const eocd = new Uint8Array(22);
-        const v = new DataView(eocd.buffer);
-        u32(v, 0, 0x06054b50); // end of central directory signature
-        u16(v, 4, 0);
-        u16(v, 6, 0);
-        u16(v, 8, central.length);
-        u16(v, 10, central.length);
-        u32(v, 12, cdSize);
-        u32(v, 16, cdOffset);
-        u16(v, 20, 0);
-        await write(eocd);
-        return offset;
-      }
-    };
-  }
 
   function formatBytes(n) {
     const v = Number(n) || 0;
@@ -445,42 +415,32 @@
 
     const setStatusText = (message) => renderStatusCard({ message });
 
+    // Visitors get a link like https://site/<album>#<code>; the form speaks in those terms.
     const makeAlbumAccessForm = ({ albumIdValue = '', secretValue = '' } = {}) => {
       const albumInput = el('input', {
-        type: 'text',
+        type: 'text', id: 'access-album',
         value: normalizeAlbumId(albumIdValue),
-        placeholder: 'albumId',
-        autocomplete: 'off',
-        style: 'width:100%;padding:10px 12px;border:1px solid rgba(0,0,0,.15);border-radius:10px;'
+        placeholder: 'e.g. 2025.06.01-summer-lake',
+        autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false'
       });
       const secretInput = el('input', {
-        type: 'text',
+        type: 'text', id: 'access-code',
         value: normalizeSecret(secretValue),
-        placeholder: 'secret',
-        autocomplete: 'off',
-        style: 'width:100%;padding:10px 12px;border:1px solid rgba(0,0,0,.15);border-radius:10px;'
+        placeholder: 'the part of the link after #',
+        autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false'
       });
-
-      const submitBtn = el(
-        'button',
-        {
-          type: 'submit',
-          style: 'margin-top:12px;appearance:none;border:1px solid rgba(0,0,0,.12);border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;background:#2c3e50;color:#fff;'
-        },
-        'Open album'
-      );
-
+      const submitBtn = el('button', { type: 'submit', class: 'access-btn' }, 'Open album');
       return el(
         'form',
         {
+          class: 'access-form',
           onsubmit: (e) => {
             e.preventDefault();
             navigateToAlbum(albumInput.value, secretInput.value);
-          },
-          style: 'margin-top:12px;display:grid;gap:10px;max-width:520px;'
+          }
         },
-        el('div', null, albumInput),
-        el('div', null, secretInput),
+        el('div', null, el('label', { for: 'access-album' }, 'Album (the part of the link after the site name)'), albumInput),
+        el('div', null, el('label', { for: 'access-code' }, 'Access code'), secretInput),
         submitBtn
       );
     };
@@ -582,15 +542,15 @@
     if (!albumId) {
       renderStatusCard({
         title: 'Open an album',
-        message: 'Enter albumId and secret to continue',
+        message: 'Paste the link you received into the address bar, or enter its parts below.',
         content: makeAlbumAccessForm({ albumIdValue: '', secretValue: '' })
       });
       return;
     }
     if (!secret) {
       renderStatusCard({
-        title: 'Secret is missing',
-        message: 'Enter secret to continue',
+        title: 'This link is incomplete',
+        message: 'The access code (the part after # in your link) is missing. Open the full link you received, or enter the code below.',
         content: makeAlbumAccessForm({ albumIdValue: albumId, secretValue: '' })
       });
       return;
@@ -761,22 +721,26 @@
 
     if (resp.status === 404) {
       renderStatusCard({
-        title: 'Album not found',
-        message: 'Please enter a correct albumId and secret',
+        title: 'We could not find this album',
+        message: 'Check the link you received. If the album was renamed or removed, ask the photographer for a new link.',
         content: makeAlbumAccessForm({ albumIdValue: albumId, secretValue: secret })
       });
       return;
     }
     if (resp.status === 403) {
       renderStatusCard({
-        title: 'Access denied',
-        message: 'Access denied. Please enter a new secret',
+        title: 'This access code does not work',
+        message: 'Make sure you opened the complete link (the code is the part after #). If the code was changed recently, ask the photographer for a new link.',
         content: makeAlbumAccessForm({ albumIdValue: albumId, secretValue: secret })
       });
       return;
     }
+    if (resp.status === 429) {
+      setStatusText('Too many requests from your network right now. Please wait a minute and reload the page.');
+      return;
+    }
     if (!resp.ok) {
-      setStatusText(`Error: ${resp.status}`);
+      setStatusText(`Something went wrong (error ${resp.status}). Please try again in a moment.`);
       return;
     }
 
@@ -805,8 +769,14 @@
       fullSrc: String(f.photoUrl || '')
     }));
 
+    initLightbox();
+
     const EAGER_IMAGES = 8;
     const HIGH_PRIORITY_IMAGES = 4;
+    // A preview that fails (typically 429 from the per-IP image limit when many people share a
+    // network, or a flaky connection) is retried a few times with a growing delay. The `r`
+    // parameter is ignored by the signature and only makes the browser skip its failed-entry cache.
+    const RETRY_DELAYS_MS = [2000, 6000, 15000];
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       const item = document.createElement('div');
@@ -817,31 +787,21 @@
       img.loading = i < EAGER_IMAGES ? 'eager' : 'lazy';
       if (i < HIGH_PRIORITY_IMAGES) img.fetchPriority = 'high';
       img.decoding = 'async';
-      img.alt = 'Photography';
-      img.src = String(f.previewUrl || f.photoUrl || '');
+      img.alt = displayName(f.name);
+      const src = String(f.previewUrl || f.photoUrl || '');
+      img.src = src;
       img.dataset.index = String(i);
+      let attempt = 0;
+      img.onerror = () => {
+        if (attempt >= RETRY_DELAYS_MS.length) return;
+        const delay = RETRY_DELAYS_MS[attempt++];
+        setTimeout(() => { img.src = `${src}&r=${attempt}`; }, delay);
+      };
       img.onclick = () => openLightboxByIndex(i);
 
       item.appendChild(img);
       gridEl.appendChild(item);
     }
-
-    // Lightbox close behavior
-    const lb = document.getElementById('lightbox');
-    if (lb) {
-      lb.onclick = (e) => {
-        // close when clicking overlay/background (not when clicking image/nav)
-        if (e && e.target === lb) closeLightbox();
-      };
-    }
-
-    document.addEventListener('keydown', (e) => {
-      const lb = document.getElementById('lightbox');
-      if (!lb || lb.style.display !== 'block') return;
-      if (e.key === 'Escape') closeLightbox();
-      else if (e.key === 'ArrowLeft') previousImage(e);
-      else if (e.key === 'ArrowRight') nextImage(e);
-    });
   }
 
   const run = () => {

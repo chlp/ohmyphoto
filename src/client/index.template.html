@@ -34,7 +34,8 @@
   <meta name="author" content="Mary Rytikova">
   <meta name="keywords"
     content="photography, portrait photography, event photography, commercial photography, Täby, Sweden, Mary Rytikova, professional photographer">
-  <meta name="robots" content="index, follow">
+  <!-- Private galleries: the shell must not be indexed (matches X-Robots-Tag in public/_headers) -->
+  <meta name="robots" content="noindex, nofollow">
 
   <!-- Favicon -->
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -114,25 +115,50 @@
     /* Album toolbar: "download all as ZIP" (built client-side, see ui.js) */
     .album-toolbar { display: none; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 18px; }
     .album-toolbar[data-visible="1"] { display: flex; }
-    .album-btn {
-      appearance: none; border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 10px;
-      padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer;
-      background: #2c3e50; color: #fff;
+    /* Buttons follow the site palette (.cta-link in styles.css): light fill, #333 border, dark on hover */
+    .album-btn, .status-card .access-btn {
+      appearance: none; border: 1px solid #333; border-radius: 4px;
+      padding: 10px 18px; font: inherit; font-size: 15px; cursor: pointer;
+      background: #333; color: #fff; transition: background-color .3s ease, color .3s ease;
     }
-    .album-btn.secondary { background: #fff; color: #2c3e50; }
+    .album-btn.secondary { background: #f8f9fa; color: #333; }
+    .album-btn:hover:not([aria-disabled="true"]), .status-card .access-btn:hover { background: #555; color: #fff; }
+    .album-btn.secondary:hover { background: #333; }
     .album-btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
-    .album-note { font-size: 14px; opacity: 0.8; }
-    .album-note.warn { opacity: 1; color: #8a3b12; }
+    .album-note { font-size: 14px; color: #666; }
+    .album-note.warn { color: #8a3b12; }
+    .status-card .access-form { margin-top: 12px; display: grid; gap: 10px; max-width: 520px; }
+    .status-card .access-form label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+    .status-card .access-form input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 4px; font: inherit; }
 
     /* Lightbox: styles.css (plushka.se) expects a .lightbox-body wrapper + side panel.
        This gallery has neither, so make the content box fill the viewport on all sizes. */
     .lightbox .lightbox-content {
       position: absolute; inset: 0; width: 100%; height: 100%;
-      padding: 16px; box-sizing: border-box;
+      padding: 16px 16px 56px; box-sizing: border-box;
+      touch-action: pan-y pinch-zoom; /* horizontal swipes are ours (see ui.js) */
     }
     .lightbox .lightbox-content img { max-width: 100%; max-height: 100%; }
+    /* Controls are real buttons (keyboard + screen readers); reset the UA button look */
+    .lightbox button.lightbox-close, .lightbox button.lightbox-nav {
+      appearance: none; border: 0; background: transparent; font: inherit; color: #fff; padding: 0;
+    }
+    .lightbox button.lightbox-close { font-size: 40px; font-weight: 700; line-height: 1; }
+    .lightbox button.lightbox-nav { background-color: rgba(0, 0, 0, .5); font-size: 30px; }
+    .lightbox button.lightbox-nav:hover { background-color: rgba(0, 0, 0, .8); }
+    .lightbox button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .lightbox-bar {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 10001;
+      display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap;
+      padding: 12px 16px; color: #ddd; font-size: 14px;
+      background: linear-gradient(to top, rgba(0, 0, 0, .6), rgba(0, 0, 0, 0));
+    }
+    .lightbox-bar .lightbox-name { max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lightbox-bar a { color: #fff; text-decoration: underline; }
     @media (max-width: 768px) {
-      .lightbox .lightbox-content { flex: none; height: 100%; padding: 8px; }
+      .lightbox .lightbox-content { flex: none; height: 100%; padding: 8px 8px 52px; }
+      .lightbox button.lightbox-close { font-size: 35px; }
+      .lightbox button.lightbox-nav { font-size: 24px; background-color: rgba(0, 0, 0, .7); }
     }
   </style>
 
@@ -194,20 +220,26 @@
     </div>
   </div>
 
-  <div id="lightbox" class="lightbox">
-    <span class="lightbox-close" onclick="closeLightbox()">&times;</span>
+  <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer">
+    <button type="button" class="lightbox-close" id="lightbox-close" aria-label="Close (Esc)">&times;</button>
     <div class="lightbox-content">
-      <img id="lightbox-img" src="" alt="Lightbox Image">
+      <img id="lightbox-img" src="" alt="">
     </div>
-    <div class="lightbox-nav lightbox-prev" onclick="previousImage(event)">&#10094;</div>
-    <div class="lightbox-nav lightbox-next" onclick="nextImage(event)">&#10095;</div>
+    <button type="button" class="lightbox-nav lightbox-prev" id="lightbox-prev" aria-label="Previous photo">&#10094;</button>
+    <button type="button" class="lightbox-nav lightbox-next" id="lightbox-next" aria-label="Next photo">&#10095;</button>
+    <div class="lightbox-bar">
+      <span id="lightbox-counter" aria-live="polite"></span>
+      <span id="lightbox-name" class="lightbox-name"></span>
+      <a id="lightbox-download" href="#" download>Download</a>
+    </div>
   </div>
 
   <script>
     // Injected by build step (see scripts/build-assets.mjs)
     window.__turnstileSiteKey = '__TURNSTILE_SITE_KEY__';
   </script>
-  <script src="/ui.js" defer></script>
+  <!-- ES module (deferred by default); imports /zip.js -->
+  <script type="module" src="/ui.js"></script>
 </body>
 
 </html>

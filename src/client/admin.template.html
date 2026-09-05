@@ -111,7 +111,7 @@
     <div class="row" style="align-items:flex-end;margin-top:10px;">
       <div style="flex:1;min-width:520px;">
         <label class="small muted" for="newSecret">Secret:</label>
-        <input id="newSecret" class="mono" placeholder="optional (a-zA-Z0-9_-)" style="width:100%;" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+        <input id="newSecret" class="mono" placeholder="optional, min 16 chars (a-zA-Z0-9_-); empty = generated" style="width:100%;" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
       </div>
       <button class="ghost genBtn" id="genSecretBtn" title="Generate a random secret">Generate</button>
     </div>
@@ -126,6 +126,7 @@
       <div class="row">
         <button class="ghost" id="gcBtn" title="Find shared photos no album references any more (dry run first, then confirm delete)">GC orphans</button>
         <button class="ghost" id="verifyAllFilesBtn" title="Check that every photo of every album exists in storage; drop broken entries">Verify files (all)</button>
+        <button class="ghost" id="trashBtn" title="Deleted albums: their info.json is kept in trash/ and can be restored">Trash</button>
         <button class="ghost" id="refreshBtn">Refresh</button>
       </div>
     </div>
@@ -143,6 +144,24 @@
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card hidden" id="trashCard">
+    <div class="row" style="justify-content: space-between;">
+      <h2 style="margin:0">Trash</h2>
+      <div class="row">
+        <button class="ghost" id="trashBackBtn">Back</button>
+        <button class="ghost" id="trashRefreshBtn">Refresh</button>
+      </div>
+    </div>
+    <div class="muted small" style="margin:8px 0;">Deleting an album keeps its <code>info.json</code> here. Restore puts it back (optionally under a new ID). Photos referenced only by a trashed album are still collected by <b>GC orphans</b>.</div>
+    <div id="trashStatus" class="muted small"></div>
+    <div style="overflow:auto;">
+      <table>
+        <thead><tr><th>albumId</th><th>deleted at</th><th>restore as</th><th>actions</th></tr></thead>
+        <tbody id="trashTbody"></tbody>
       </table>
     </div>
   </div>
@@ -206,6 +225,23 @@
 
     // Cloudflare Turnstile site key (injected by build step)
     const TURNSTILE_SITE_KEY = '__TURNSTILE_SITE_KEY__';
+
+    // Must match src/utils/validate.js (isValidAlbumSecret / MIN_ALBUM_SECRET_LENGTH) and
+    // src/api/admin/albums.js (generateAlbumSecret). The secret is also the HMAC key of every
+    // image URL, so short ones can be brute-forced offline from a single leaked URL.
+    const SECRET_RE = /^[a-zA-Z0-9_-]{1,256}$/;
+    const MIN_SECRET_LENGTH = 16;
+    const isValidSecret = (s) => SECRET_RE.test(String(s || ''));
+    const isWeakSecret = (s) => String(s || '').length < MIN_SECRET_LENGTH;
+    function generateSecret() {
+      const bytes = new Uint8Array(10); // 10 bytes => 20 hex chars
+      crypto.getRandomValues(bytes);
+      let hex = '';
+      for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+      return hex;
+    }
+    // Server-side pages (see src/api/admin/infoStore.js); the UI loops until `done`.
+    const ATTACH_CHUNK = 20;
 
     let currentEditAlbumId = '';
     let currentEditSecret = '';
@@ -798,20 +834,42 @@
       }
     }
 
+    /** Loop POST verify-files with `cursor` until `done`; returns the aggregated result. */
+    async function verifyAlbumPaged(albumId, onProgress) {
+      let cursor = null;
+      const acc = { fileCount: 0, checked: 0, invalid: 0, removed: [], missingPreviewCount: 0, sizeUpdated: 0 };
+      do {
+        const resp = await api(`/api/admin/album/${encodeURIComponent(albumId)}/verify-files`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cursor ? { cursor } : {})
+        });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data || data.ok !== true) throw new Error(`HTTP ${resp.status}${data && data.error ? ` ${data.error}` : ''}`);
+        acc.fileCount = data.fileCount || 0;
+        acc.checked += data.checked || 0;
+        acc.invalid += data.invalid || 0;
+        acc.removed.push(...(data.removed || []));
+        acc.missingPreviewCount += data.missingPreviewCount || 0;
+        acc.sizeUpdated += data.sizeUpdated || 0;
+        if (onProgress) onProgress(acc);
+        cursor = data.done ? null : data.cursor;
+      } while (cursor);
+      return acc;
+    }
+
     async function verifyFiles() {
       if (!currentEditAlbumId) return;
       const btn = $('verifyFilesBtn');
       if (btn) btn.disabled = true;
       try {
-        filesStatusEl.textContent = 'Verifying files...';
-        const resp = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/verify-files`, { method: 'POST' });
-        const data = await resp.json().catch(() => null);
-        if (!resp.ok || !data || data.ok !== true) {
-          filesStatusEl.textContent = `Verify error: ${resp.status}`;
-          return;
-        }
-        filesStatusEl.textContent = `Verified. files=${data.fileCount || 0}, invalid=${data.invalid || 0}, removed=${(data.removed || []).length}, missingPreview=${data.missingPreviewCount || 0}`;
+        const r = await verifyAlbumPaged(currentEditAlbumId, (p) => {
+          filesStatusEl.textContent = `Verifying files... ${p.checked} checked`;
+        });
         await refreshFiles().catch(() => {});
+        filesStatusEl.textContent = `Verified. files=${r.fileCount}, invalid=${r.invalid}, removed=${r.removed.length}, missingPreview=${r.missingPreviewCount}, sizeUpdated=${r.sizeUpdated}`;
+      } catch (e) {
+        filesStatusEl.textContent = `Verify error: ${String(e && e.message || e)}`;
       } finally {
         if (btn) btn.disabled = false;
       }
@@ -821,15 +879,28 @@
       const btn = $('verifyAllFilesBtn');
       if (btn) btn.disabled = true;
       try {
-        statusEl.textContent = 'Verifying files for all albums...';
-        const resp = await api('/api/admin/albums/verify-files', { method: 'POST' });
-        const data = await resp.json().catch(() => null);
-        if (!resp.ok || !data || data.ok !== true) {
-          statusEl.textContent = `Verify-all error: ${resp.status}`;
-          return;
+        // One paged verify per album, driven from the browser: the server never touches more
+        // than one page of objects per request (Free-plan subrequest budget).
+        const albums = lastAlbums.slice();
+        const total = { files: 0, invalid: 0, removed: 0, missingPreview: 0, sizeUpdated: 0, err: 0 };
+        for (let i = 0; i < albums.length; i++) {
+          const a = albums[i];
+          try {
+            const r = await verifyAlbumPaged(a.albumId, (p) => {
+              statusEl.textContent = `Verifying (${i + 1}/${albums.length}) ${a.albumId}: ${p.checked} checked...`;
+            });
+            total.files += r.fileCount;
+            total.invalid += r.invalid;
+            total.removed += r.removed.length;
+            total.missingPreview += r.missingPreviewCount;
+            total.sizeUpdated += r.sizeUpdated;
+          } catch (e) {
+            console.warn('verify failed', a.albumId, e);
+            total.err += 1;
+          }
         }
-        statusEl.textContent = `Verified all. albums=${data.albumCount || 0}, err=${data.albumsErr || 0}, totalFiles=${data.totalFiles || 0}, invalid=${data.totalInvalid || 0}, removed=${data.totalRemoved || 0}, missingPreview=${data.totalMissingPreview || 0}`;
         await refresh().catch(() => {});
+        statusEl.textContent = `Verified all. albums=${albums.length}, err=${total.err}, totalFiles=${total.files}, invalid=${total.invalid}, removed=${total.removed}, missingPreview=${total.missingPreview}, sizeUpdated=${total.sizeUpdated}`;
       } finally {
         if (btn) btn.disabled = false;
       }
@@ -843,6 +914,7 @@
       uploadStatusEl.textContent = `Processing ${list.length} file(s)...`;
 
       let reused = 0;
+      const failed = []; // [fileName, reason]
       for (let i = 0; i < list.length; i++) {
         const file = list[i];
         const outName = normalizeUploadName(file.name);
@@ -863,8 +935,8 @@
               });
               if (r.ok) { reused += 1; continue; }
               if (r.status !== 409) {
-                uploadStatusEl.textContent = `Attach failed (${outName}): ${r.status} ${await r.text()}`;
-                return;
+                failed.push([file.name, `attach ${r.status} ${await r.text()}`]);
+                continue;
               }
               // 409: name taken by a different photo -> fall through to the normal upload (which also 409s unless overwrite)
             }
@@ -881,8 +953,8 @@
           previewBlob = await toJpegBlob(file, 1000);
         } catch (e) {
           console.error(e);
-          uploadStatusEl.textContent = `Failed to process ${file.name}: ${String(e)}`;
-          return;
+          failed.push([file.name, `cannot decode (HEIC/RAW are not supported by this browser): ${String(e && e.message || e)}`]);
+          continue;
         }
 
         const fd = new FormData();
@@ -898,14 +970,16 @@
           body: fd
         });
         if (!r.ok) {
-          const t = await r.text();
-          uploadStatusEl.textContent = `Upload failed (${outName}): ${r.status} ${t}`;
-          return;
+          failed.push([file.name, `upload ${r.status} ${await r.text()}`]);
         }
       }
 
-      uploadStatusEl.textContent = reused ? `Upload complete. ${reused} file(s) already existed and were attached without re-uploading.` : 'Upload complete.';
-      uploadInputEl.value = '';
+      const okCount = list.length - failed.length;
+      let msg = `Upload complete: ${okCount}/${list.length} file(s)`;
+      if (reused) msg += `, ${reused} already existed and were attached without re-uploading`;
+      if (failed.length) msg += `. Failed (${failed.length}): ` + failed.map(([n, why]) => `${n} (${why})`).join('; ');
+      uploadStatusEl.textContent = msg;
+      if (!failed.length) uploadInputEl.value = '';
       await refreshFiles();
     }
 
@@ -984,26 +1058,44 @@
       const status = $('srcStatus');
       const files = [...srcSelected].map(([ref, name]) => ({ name, ref }));
       if (!files.length) return alert('Select photos first');
-      status.textContent = `Adding ${files.length} photo(s)...`;
-      const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, {
+      // The server accepts ATTACH_CHUNK entries per request (one head() each). Chunks that hit a
+      // name conflict are collected and re-sent with overwrite after one confirmation.
+      const postChunk = (chunk, overwrite) => api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files })
+        body: JSON.stringify(overwrite ? { files: chunk, overwrite: true } : { files: chunk })
       });
-      const data = await r.json().catch(() => null);
-      if (r.status === 409 && data && Array.isArray(data.conflicts)) {
-        if (!confirm(`These names already exist in this album with a different photo:\n${data.conflicts.join('\n')}\n\nReplace them?`)) { status.textContent = 'Cancelled.'; return; }
-        const r2 = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ files, overwrite: true })
-        });
-        if (!r2.ok) { status.textContent = `Add failed: ${r2.status} ${await r2.text()}`; return; }
-      } else if (!r.ok) {
+      const chunks = [];
+      for (let i = 0; i < files.length; i += ATTACH_CHUNK) chunks.push(files.slice(i, i + ATTACH_CHUNK));
+      const conflicting = [];
+      const conflictNames = [];
+      let added = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        status.textContent = `Adding ${files.length} photo(s)... ${added} done`;
+        const r = await postChunk(chunks[i], false);
+        const data = await r.json().catch(() => null);
+        if (r.ok) { added += chunks[i].length; continue; }
+        if (r.status === 409 && data && Array.isArray(data.conflicts)) {
+          conflicting.push(chunks[i]);
+          conflictNames.push(...data.conflicts);
+          continue;
+        }
         status.textContent = `Add failed: ${r.status} ${data ? JSON.stringify(data) : ''}`;
         return;
       }
-      status.textContent = `Added ${files.length} photo(s).`;
+      if (conflicting.length) {
+        if (!confirm(`These names already exist in this album with a different photo:\n${conflictNames.join('\n')}\n\nReplace them?`)) {
+          status.textContent = added ? `Added ${added} photo(s); ${conflictNames.length} conflicting name(s) skipped.` : 'Cancelled.';
+          await refreshFiles();
+          return;
+        }
+        for (const chunk of conflicting) {
+          const r2 = await postChunk(chunk, true);
+          if (!r2.ok) { status.textContent = `Add failed: ${r2.status} ${await r2.text()}`; return; }
+          added += chunk.length;
+        }
+      }
+      status.textContent = `Added ${added} photo(s).`;
       for (const cb of $('srcFilesGrid').querySelectorAll('input[type=checkbox]')) cb.checked = false;
       srcSelected = new Map();
       await refreshFiles();
@@ -1026,7 +1118,9 @@
         deleted += data.deleted || 0;
         scanned += data.scanned || 0;
         for (const k of data.orphans || []) if (sample.length < 20) sample.push(k);
-        statusEl.textContent = `${dryRun ? 'Scanning' : 'Deleting'}... ${scanned} scanned, ${orphans} orphan(s)`;
+        statusEl.textContent = data.phase === 'refs'
+          ? `Collecting references... ${data.albumCount} album(s), ${data.referencedRefs} photo(s) referenced`
+          : `${dryRun ? 'Scanning' : 'Deleting'} ${data.prefix}... ${scanned} scanned, ${orphans} orphan(s)`;
         cursor = data.done ? null : data.cursor;
       } while (cursor);
       return { orphans, deleted, scanned, sample };
@@ -1049,20 +1143,90 @@
       }
     }
 
+    // ---- Trash (deleted albums' info.json) ----
+    function showTrash(show) {
+      $('trashCard').classList.toggle('hidden', !show);
+      albumsCardEl.classList.toggle('hidden', show);
+    }
+
+    async function refreshTrash() {
+      const status = $('trashStatus');
+      const tbody = $('trashTbody');
+      status.textContent = 'Loading...';
+      tbody.innerHTML = '';
+      const resp = await api('/api/admin/trash', { method: 'GET' });
+      if (!resp.ok) { status.textContent = `Error: ${resp.status}`; return; }
+      const data = await resp.json();
+      const items = data.items || [];
+      status.textContent = items.length ? `${items.length} trashed album(s)${data.truncated ? ' (showing the first 1000)' : ''}` : 'Trash is empty.';
+      for (const t of items) {
+        const tr = document.createElement('tr');
+        const tdId = document.createElement('td');
+        tdId.className = 'mono';
+        tdId.textContent = t.albumId;
+        tr.appendChild(tdId);
+        const tdAt = document.createElement('td');
+        tdAt.textContent = new Date(t.deletedAt).toLocaleString();
+        tr.appendChild(tdAt);
+        const tdAs = document.createElement('td');
+        const asInput = document.createElement('input');
+        asInput.className = 'mono';
+        asInput.placeholder = t.albumId;
+        tdAs.appendChild(asInput);
+        tr.appendChild(tdAs);
+        const tdActions = document.createElement('td');
+        const restoreBtn = document.createElement('button');
+        restoreBtn.className = 'primary';
+        restoreBtn.textContent = 'Restore';
+        restoreBtn.onclick = async () => {
+          const albumId = asInput.value.trim();
+          const r = await api('/api/admin/trash/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(albumId ? { key: t.key, albumId } : { key: t.key })
+          });
+          if (!r.ok) { alert(`Restore failed: ${r.status} ${(await r.text()).slice(0, 200)}`); return; }
+          await refreshTrash();
+          await refresh().catch(() => {});
+        };
+        const dropBtn = document.createElement('button');
+        dropBtn.className = 'danger';
+        dropBtn.textContent = 'Delete forever';
+        dropBtn.onclick = async () => {
+          if (!confirm(`Permanently delete the trashed metadata of "${t.albumId}" (${t.deletedAt})? Photos are not affected.`)) return;
+          const r = await api(`/api/admin/trash/${encodeURIComponent(t.key)}`, { method: 'DELETE' });
+          if (!r.ok) { alert(`Delete failed: ${r.status}`); return; }
+          await refreshTrash();
+        };
+        tdActions.appendChild(restoreBtn);
+        tdActions.appendChild(document.createTextNode(' '));
+        tdActions.appendChild(dropBtn);
+        tr.appendChild(tdActions);
+        tbody.appendChild(tr);
+      }
+    }
+
     async function refresh() {
       statusEl.textContent = 'Loading...';
-      const resp = await api('/api/admin/albums', { method: 'GET' });
-      if (resp.status === 401) {
-        statusEl.textContent = 'Unauthorized (401). Set ADMIN_TOKEN.';
-        $('tbody').innerHTML = '';
-        return;
-      }
-      if (!resp.ok) {
-        statusEl.textContent = `Error: ${resp.status}`;
-        return;
-      }
-      const data = await resp.json();
-      const albums = data.albums || [];
+      // The list is paged (PAGE_ALBUMS per request); follow `cursor` until `done`.
+      const albums = [];
+      let cursor = null;
+      do {
+        const resp = await api(`/api/admin/albums${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { method: 'GET' });
+        if (resp.status === 401) {
+          statusEl.textContent = 'Unauthorized (401). Set ADMIN_TOKEN.';
+          $('tbody').innerHTML = '';
+          return;
+        }
+        if (!resp.ok) {
+          statusEl.textContent = `Error: ${resp.status}`;
+          return;
+        }
+        const data = await resp.json();
+        albums.push(...(data.albums || []));
+        cursor = data.done ? null : data.cursor;
+        if (cursor) statusEl.textContent = `Loading... ${albums.length} albums`;
+      } while (cursor);
       lastAlbums = albums;
       fillSrcAlbumSelect();
 
@@ -1104,13 +1268,33 @@
         tdSecrets.appendChild(secretsArea);
         const hint = document.createElement('div');
         hint.className = 'muted small';
-        hint.textContent = `Current count: ${a.secretCount || 0}`;
+        const updateSecretsHint = () => {
+          const list = parseSecrets(secretsArea.value);
+          const weak = list.filter(isWeakSecret).length;
+          const bad = list.filter((x) => !isValidSecret(x)).length;
+          hint.textContent = `Count: ${list.length}` + (weak ? `. ${weak} weak (< ${MIN_SECRET_LENGTH} chars): add a generated one, share the new link, then remove the old.` : '') + (bad ? `. ${bad} invalid (allowed: a-z A-Z 0-9 _ -)` : '');
+          hint.style.color = weak || bad ? '#b42318' : '';
+        };
+        updateSecretsHint();
         tdSecrets.appendChild(hint);
+        const addSecretBtn = document.createElement('button');
+        addSecretBtn.className = 'ghost small';
+        addSecretBtn.type = 'button';
+        addSecretBtn.textContent = '+ generated secret';
+        addSecretBtn.title = 'Append a new random secret (save to apply)';
+        addSecretBtn.onclick = () => {
+          const list = parseSecrets(secretsArea.value);
+          list.push(generateSecret());
+          secretsArea.value = list.join('\n');
+          secretsArea.dispatchEvent(new Event('input'));
+        };
+        tdSecrets.appendChild(addSecretBtn);
         tr.appendChild(tdSecrets);
 
         // Render public links next to the title (one per secret)
         renderAlbumLinks(links, a.albumId, parseSecrets(secretsArea.value));
         secretsArea.addEventListener('input', () => {
+          updateSecretsHint();
           renderAlbumLinks(links, a.albumId, parseSecrets(secretsArea.value));
         });
 
@@ -1157,7 +1341,8 @@
               body: JSON.stringify(payload)
             });
             if (!r.ok) {
-              alert(`Save failed: ${r.status}`);
+              const t = await r.text().catch(() => '');
+              alert(`Save failed: ${r.status} ${t.slice(0, 200)}`);
               return;
             }
           } finally {
@@ -1190,6 +1375,9 @@
     }
 
     $('refreshBtn').onclick = refresh;
+    $('trashBtn').onclick = () => { showTrash(true); refreshTrash().catch((e) => { $('trashStatus').textContent = String(e); }); };
+    $('trashBackBtn').onclick = () => showTrash(false);
+    $('trashRefreshBtn').onclick = () => refreshTrash().catch((e) => { $('trashStatus').textContent = String(e); });
     $('verifyAllFilesBtn').onclick = () => verifyAllFiles().catch(() => {});
     $('backToAlbumsBtn').onclick = () => hideEditor();
     $('refreshFilesBtn').onclick = () => refreshFiles().catch(() => {});
@@ -1206,22 +1394,13 @@
       const secretEl = $('newSecret');
       const secretRaw = secretEl.value.trim();
       if (!albumId) return alert('albumId required');
-      const isValidSecret = (s) => /^[a-zA-Z0-9_-]{1,256}$/.test(String(s || ''));
-      function randomHex(bytesLen) {
-        const bytes = new Uint8Array(bytesLen);
-        crypto.getRandomValues(bytes);
-        let hex = "";
-        for (const b of bytes) hex += b.toString(16).padStart(2, "0");
-        return hex;
-      }
-      function generateSecret6() {
-        // 3 bytes => 6 hex chars
-        return randomHex(3);
-      }
       if (secretRaw && !isValidSecret(secretRaw)) {
         return alert('Invalid secret. Allowed: a-z A-Z 0-9 _ - (max 256 chars).');
       }
-      const secret = secretRaw || generateSecret6();
+      if (secretRaw && isWeakSecret(secretRaw)) {
+        return alert(`Secret too short: at least ${MIN_SECRET_LENGTH} characters (it is also the key that signs every photo URL). Leave the field empty to generate one.`);
+      }
+      const secret = secretRaw || generateSecret();
       const r = await api('/api/admin/album', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1239,11 +1418,7 @@
 
     $('genSecretBtn').onclick = () => {
       const secretEl = $('newSecret');
-      const bytes = new Uint8Array(3); // 3 bytes => 6 hex chars
-      crypto.getRandomValues(bytes);
-      let hex = "";
-      for (const b of bytes) hex += b.toString(16).padStart(2, "0");
-      secretEl.value = hex;
+      secretEl.value = generateSecret();
       try { secretEl.focus(); secretEl.select(); } catch {}
     };
 
