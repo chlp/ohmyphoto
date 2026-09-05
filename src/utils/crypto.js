@@ -64,13 +64,13 @@ export function timingSafeEqual(a, b) {
 }
 
 /**
- * Signature for image URLs: HMAC-SHA256(key = secret, message = `${albumId}:${name}`), hex.
+ * Signature for image URLs: HMAC-SHA256(key = secret, message = `${albumId}:${ref}`), hex.
  * The admin UI computes the same value client-side (see admin.template.html).
  * @param {string} albumId
- * @param {string} name
+ * @param {string} ref photo ref (sha256 hex)
  * @param {string} secret
  * @returns {Promise<string>}
  */
-export async function imageSig(albumId, name, secret) {
-  return hmacSha256Hex(secret, `${albumId}:${name}`);
+export async function imageSig(albumId, ref, secret) {
+  return hmacSha256Hex(secret, `${albumId}:${ref}`);
 }

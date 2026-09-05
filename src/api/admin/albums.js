@@ -1,7 +1,6 @@
 import { jsonNoStore, badRequest, conflict, notFound } from '../../utils/response.js';
 import { getAlbumInfoWithSecrets, invalidateAlbumCache } from '../../utils/album.js';
 import { isValidAlbumId, isValidAlbumSecret } from '../../utils/validate.js';
-import { copyObject, listAllKeys } from '../../utils/r2.js';
 import { readJson } from '../../utils/http.js';
 import { bytesToHex } from '../../utils/crypto.js';
 import {
@@ -9,6 +8,7 @@ import {
   getInfoJson,
   infoKey,
   listAlbumIds,
+  mapLimit,
   normalizeSecretsToObject,
   putInfoJson
 } from './infoStore.js';
@@ -22,56 +22,6 @@ function generateAlbumSecret6() {
   return bytesToHex(bytes);
 }
 
-/** Run `fn` over `items` with at most `limit` in flight. */
-async function mapLimit(items, limit, fn) {
-  const out = new Array(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return out;
-}
-
-/**
- * Move album objects (photos + previews) from one prefix to another, one object at a time
- * (copy, then delete). Sequential + bounded per call so a single Worker invocation stays
- * well under the subrequest limit; the caller repeats the request until `done`.
- * info.json is NOT moved here — it is written last by the caller so that a partially
- * moved album can always be resumed (old info.json present, new one absent).
- */
-export async function moveAlbumObjects(env, oldAlbumId, newAlbumId, maxObjects) {
-  const oldPrefix = `albums/${oldAlbumId}/`;
-  const newPrefix = `albums/${newAlbumId}/`;
-  const oldInfo = infoKey(oldAlbumId);
-
-  const keys = (await listAllKeys(env.BUCKET, oldPrefix)).filter((k) => k !== oldInfo);
-  const budget = Math.max(1, Number(maxObjects) || 200);
-
-  let moved = 0;
-  for (const key of keys) {
-    if (moved >= budget) break;
-    const newKey = newPrefix + key.substring(oldPrefix.length);
-    await copyObject(env.BUCKET, key, newKey);
-    await env.BUCKET.delete(key);
-    moved += 1;
-  }
-  const remaining = keys.length - moved;
-  return { done: remaining === 0, moved, remaining };
-}
-
-export async function deleteAlbumObjects(env, albumId) {
-  const keys = await listAllKeys(env.BUCKET, `albums/${albumId}/`);
-  if (!keys.length) return false;
-  for (let i = 0; i < keys.length; i += 100) {
-    await env.BUCKET.delete(keys.slice(i, i + 100));
-  }
-  return true;
-}
-
 /** GET /api/admin/albums */
 export async function handleListAlbums({ env }) {
   const ids = await listAlbumIds(env);
@@ -82,7 +32,8 @@ export async function handleListAlbums({ env }) {
       albumId,
       title: String(r.info?.title || DEFAULT_TITLE),
       secretCount: r.secrets.length,
-      secrets: r.secrets
+      secrets: r.secrets,
+      fileCount: Array.isArray(r.info?.files) ? r.info.files.length : 0
     };
   });
   return jsonNoStore({ albums: loaded.filter(Boolean) });
@@ -109,8 +60,8 @@ export async function handleCreateAlbum({ request, env }) {
 /**
  * PUT /api/admin/album/<albumId>
  * Body: { title?, secrets?: string[], newAlbumId? }
- * Rename is chunked: while objects remain the response is
- * { albumId, renameInProgress: true, moved, remaining } and the client must repeat the call.
+ * An album is only its info.json, so a rename is one put + one delete; photos are shared and
+ * addressed by content, nothing moves.
  */
 export async function handleUpdateAlbum({ request, env, params: [albumId] }) {
   if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
@@ -131,35 +82,24 @@ export async function handleUpdateAlbum({ request, env, params: [albumId] }) {
     : (existingInfo.secrets && typeof existingInfo.secrets === "object" ? existingInfo.secrets : {});
 
   const nextInfo = { ...existingInfo, title: nextTitle, secrets: nextSecretsObj };
-  delete nextInfo.secret; // keep one canonical format
 
   if (!newAlbumId || newAlbumId === albumId) {
     await putInfoJson(env, albumId, nextInfo);
     return jsonNoStore({ albumId, title: nextTitle });
   }
 
-  // Rename: destination is "taken" only if its info.json exists (written last, so a
-  // previously interrupted rename can be resumed by repeating the same request).
   if (await albumExists(env, newAlbumId)) return conflict("Destination album already exists");
-
-  const progress = await moveAlbumObjects(env, albumId, newAlbumId, Number(env.ALBUM_RENAME_BATCH) || 200);
-  if (!progress.done) {
-    await invalidateAlbumCache(env, albumId); // gallery must not serve stale file list
-    return jsonNoStore({ albumId, renameInProgress: true, moved: progress.moved, remaining: progress.remaining });
-  }
-
-  await env.BUCKET.put(infoKey(newAlbumId), JSON.stringify(nextInfo, null, 2), {
-    httpMetadata: { contentType: "application/json; charset=utf-8" }
-  });
+  await putInfoJson(env, newAlbumId, nextInfo);
   await env.BUCKET.delete(infoKey(albumId));
-  await Promise.all([invalidateAlbumCache(env, albumId), invalidateAlbumCache(env, newAlbumId)]);
+  await invalidateAlbumCache(env, albumId);
   return jsonNoStore({ albumId: newAlbumId, title: nextTitle, renamedFrom: albumId });
 }
 
-/** DELETE /api/admin/album/<albumId> */
+/** DELETE /api/admin/album/<albumId> — removes info.json only; shared photos are reclaimed by GC. */
 export async function handleDeleteAlbum({ env, params: [albumId] }) {
   if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
-  const existed = await deleteAlbumObjects(env, albumId);
+  const existed = await albumExists(env, albumId);
+  if (existed) await env.BUCKET.delete(infoKey(albumId));
   await invalidateAlbumCache(env, albumId);
   if (!existed) return notFound();
   return jsonNoStore({ deleted: true, albumId });

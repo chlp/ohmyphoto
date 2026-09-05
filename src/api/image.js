@@ -1,12 +1,14 @@
 import { imageSig, timingSafeEqual } from '../utils/crypto.js';
 import { getAlbumInfoWithSecrets } from '../utils/album.js';
 import { forbidden, notFound } from '../utils/response.js';
-import { isValidAlbumId, isValidPhotoFileName } from '../utils/validate.js';
+import { isValidAlbumId } from '../utils/validate.js';
+import { imageObjectKey } from '../utils/albumFiles.js';
 
-// Browser cache 1h; Cloudflare edge cache (Cache API, per PoP) 1 day.
-// Trade-off: after a secret rotation, already-cached signed URLs keep working at the edge
-// until s-maxage expires. Lower IMAGE_EDGE_MAX_AGE_S if faster revocation matters more.
-const BROWSER_MAX_AGE_S = 3600;
+// Objects are content-addressed and never change, so browsers may cache them for a year.
+// Cloudflare edge cache (Cache API, per PoP) 1 day. Trade-off: after a secret rotation,
+// already-cached signed URLs keep working at the edge until s-maxage expires. Lower
+// IMAGE_EDGE_MAX_AGE_S if faster revocation matters more.
+const BROWSER_MAX_AGE_S = 31536000;
 const EDGE_MAX_AGE_S = 86400;
 
 function getEdgeCache() {
@@ -18,24 +20,22 @@ function getEdgeCache() {
 }
 
 /**
- * Handle GET /img/<albumId>/(photos|preview)/<name>?s=<sig>
+ * Handle GET /img/<albumId>/(photos|preview)/<ref>?s=<sig>
  *
- * The signature is part of the URL, so a cache hit means this exact URL was already
- * verified; no need to re-load info.json for cached responses.
+ * The object is shared (photos/<ref>.jpg); the signature binds the ref to this album's secret,
+ * so access stays per-album. The signature is part of the URL, so a cache hit means this exact
+ * URL was already verified; no need to re-load info.json for cached responses. Never lists R2.
  */
-export async function handleImageRequest(request, env, albumId, kind, name, ctx) {
+export async function handleImageRequest(request, env, albumId, kind, ref, ctx) {
   const url = new URL(request.url);
   const sig = url.searchParams.get('s') || '';
 
-  // Defensive validation (router already constrains kind; still validate inputs here).
   if (!isValidAlbumId(albumId)) {
     return forbidden();
   }
-  if (kind !== "photos" && kind !== "preview") {
-    return notFound();
-  }
-  if (!isValidPhotoFileName(name)) {
-    return forbidden();
+  const key = imageObjectKey(kind, ref);
+  if (!key) {
+    return kind === "photos" || kind === "preview" ? forbidden() : notFound();
   }
 
   // Require signature
@@ -71,7 +71,7 @@ export async function handleImageRequest(request, env, albumId, kind, name, ctx)
   // Check every secret (no early exit) so timing does not reveal which one matched.
   let ok = false;
   for (const secret of secrets) {
-    const expected = await imageSig(albumId, name, secret);
+    const expected = await imageSig(albumId, ref, secret);
     if (timingSafeEqual(expected, sig)) ok = true;
   }
 
@@ -79,7 +79,6 @@ export async function handleImageRequest(request, env, albumId, kind, name, ctx)
     return forbidden();
   }
 
-  const key = `albums/${albumId}/${kind}/${name}`;
   const obj = await env.BUCKET.get(key);
   if (!obj) return notFound();
 
@@ -87,7 +86,7 @@ export async function handleImageRequest(request, env, albumId, kind, name, ctx)
   obj.writeHttpMetadata(headers);
   headers.set("ETag", obj.httpEtag);
   headers.set("X-Robots-Tag", "noindex, nofollow");
-  headers.set("Cache-Control", `public, max-age=${BROWSER_MAX_AGE_S}, s-maxage=${edgeMaxAge}`);
+  headers.set("Cache-Control", `public, max-age=${BROWSER_MAX_AGE_S}, immutable, s-maxage=${edgeMaxAge}`);
   headers.set("X-OhMyPhoto-Cache", "MISS");
 
   const response = new Response(obj.body, { headers });

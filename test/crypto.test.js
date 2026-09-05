@@ -33,12 +33,11 @@ describe("timingSafeEqual", () => {
 });
 
 describe("extractSecrets", () => {
-  it("supports legacy and canonical formats, de-duplicated", () => {
-    expect(extractSecrets({ secret: "a" })).toEqual(["a"]);
+  it("reads the secrets object keys and ignores anything else", () => {
     expect(extractSecrets({ secrets: { a: {}, b: 1 } })).toEqual(["a", "b"]);
-    expect(extractSecrets({ secret: "a", secrets: { a: {}, c: {} } })).toEqual(["a", "c"]);
+    expect(extractSecrets({ secret: "a" })).toEqual([]);
     expect(extractSecrets({})).toEqual([]);
     expect(extractSecrets(null)).toEqual([]);
-    expect(extractSecrets({ secret: "", secrets: { "": 1 } })).toEqual([]);
+    expect(extractSecrets({ secrets: { "": 1 } })).toEqual([]);
   });
 });

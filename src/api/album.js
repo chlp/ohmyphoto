@@ -5,7 +5,7 @@ import { imageSig } from '../utils/crypto.js';
 import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.js';
 import { getClientIp, readJson } from '../utils/http.js';
 import { getCookieValue, makeSetCookie } from '../utils/cookies.js';
-import { isValidPhotoFileName } from '../utils/validate.js';
+import { parseFileEntries } from '../utils/albumFiles.js';
 
 /**
  * Handle POST /api/album/<albumId>
@@ -217,25 +217,24 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   const info = checkResult.info;
   const matchedSecret = checkResult.matchedSecret;
 
-  // NO LISTING: photo list must be provided in info.json (managed via admin)
+  // NO LISTING: photo list must be provided in info.json (managed via admin).
+  // Entries are { name, ref }; ref addresses the shared photos/<ref>.jpg object.
   const __tFiles = __ompNowMs();
   const rawFiles = info && Array.isArray(info.files) ? info.files : null;
   if (!rawFiles) {
     return new Response("Album is missing files list in info.json", { status: 500 });
   }
-  const names = rawFiles
-    .map((n) => String(n || "").trim())
-    .filter((n) => isValidPhotoFileName(n));
+  const entries = parseFileEntries(info);
   __mark('album_files_info', __tFiles);
 
   const __tSig = __ompNowMs();
-  const files = names.map(async (name) => {
-    const sig = await imageSig(albumId, name, matchedSecret);
-    const qs = `?s=${sig}`;
+  const files = entries.map(async ({ name, ref }) => {
+    const sig = await imageSig(albumId, ref, matchedSecret);
+    const base = `/img/${encodeURIComponent(albumId)}`;
     return {
       name,
-      photoUrl: `/img/${encodeURIComponent(albumId)}/photos/${encodeURIComponent(name)}${qs}`,
-      previewUrl: `/img/${encodeURIComponent(albumId)}/preview/${encodeURIComponent(name)}${qs}`
+      photoUrl: `${base}/photos/${ref}?s=${sig}`,
+      previewUrl: `${base}/preview/${ref}?s=${sig}`
     };
   });
 
@@ -254,7 +253,7 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
     "Referrer-Policy": "no-referrer",
     "Server-Timing": __ompFormatServerTiming([...__timings, ['total', (__ompNowMs() - __tStart)]]),
     "X-OhMyPhoto-Index": "info_json",
-    "X-OhMyPhoto-FileCount": String(Array.isArray(names) ? names.length : 0),
+    "X-OhMyPhoto-FileCount": String(entries.length),
   };
   if (setBypassCookie && bypassCookieHeader) {
     extra["Set-Cookie"] = bypassCookieHeader;

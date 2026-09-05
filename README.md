@@ -4,10 +4,12 @@ Private photo gallery web service.
 This is a **minimal private photo gallery** built on **Cloudflare Workers + R2**:
 
 - **Storage**: photos/previews and album metadata live in **Cloudflare R2**
-- **Albums**: each album is a folder under `albums/<albumId>/`
-  - `albums/<albumId>/info.json` stores album settings (e.g. title/secret)
-  - `albums/<albumId>/photos/*` original images
-  - `albums/<albumId>/preview/*` preview images
+- **Photos are stored once, content-addressed**, and shared between albums:
+  - `photos/<sha256>.jpg` original image, `previews/<sha256>.jpg` preview
+  - the hash is computed from the original source file in the browser, so re-uploading the same photo (into any album, from any device) never stores a second copy
+- **Albums** are just lists of references: `albums/<albumId>/info.json` holds title, secrets and `files: [{ name, ref }]`
+  - renaming an album or a photo, deleting a photo from an album, or building a new gallery from existing photos touches only `info.json` — no objects are copied or moved
+  - deleted/unreferenced photos are reclaimed by an explicit **GC** in the admin UI
 
 ### “PrivateBin style” secret via URL hash
 

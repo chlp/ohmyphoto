@@ -13,8 +13,10 @@ export default defineConfig({
           ADMIN_TOKEN: "test-admin-token",
           // Turnstile off in tests (also overrides any value from .dev.vars)
           TURNSTILE_SECRET_KEY: "",
-          // Force multi-step album rename so the resumable path is exercised
-          ALBUM_RENAME_BATCH: "1"
+          // GC in tests must see freshly uploaded orphans
+          PHOTO_GC_GRACE_MS: "0",
+          // The e2e suite makes far more than 60 admin calls/min; limiter logic is covered in durable.test.js
+          RATE_LIMIT_DISABLED: "1"
         }
       }
     })

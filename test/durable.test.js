@@ -76,7 +76,7 @@ describe("AlbumInfoDO", () => {
     expect(first.info.title).toBe("T");
 
     // change R2 behind the cache: DO must still serve the cached copy
-    await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify({ title: "T2", secret: "s2", files: [] }));
+    await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify({ title: "T2", secrets: { s2: {} }, files: [] }));
     const second = (await get()).data;
     expect(second).toMatchObject({ ok: true, cached: true, secrets: ["s1"] });
 

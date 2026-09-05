@@ -3,14 +3,17 @@ import { authorizeAdmin, handleSession } from './auth.js';
 import { handleGenerateAlbumId } from './ai.js';
 import { handleCreateAlbum, handleDeleteAlbum, handleListAlbums, handleUpdateAlbum } from './albums.js';
 import {
+  handleAttachFiles,
   handleDeleteFile,
   handleListFiles,
+  handlePhotoExists,
   handleRawImage,
-  handleRebuildAllFiles,
-  handleRebuildFiles,
   handleRenameFile,
-  handleUploadFile
+  handleUploadFile,
+  handleVerifyAllFiles,
+  handleVerifyFiles
 } from './files.js';
+import { handleGcPhotos } from './gc.js';
 
 /**
  * Admin route table. Patterns are matched against the full pathname; capture groups are
@@ -22,15 +25,19 @@ const ROUTES = [
   { method: "POST", pattern: /^\/api\/admin\/generate-album-id$/, handler: handleGenerateAlbumId },
 
   { method: "GET", pattern: /^\/api\/admin\/albums$/, handler: handleListAlbums },
-  { method: "POST", pattern: /^\/api\/admin\/albums\/rebuild-files$/, handler: handleRebuildAllFiles },
+  { method: "POST", pattern: /^\/api\/admin\/albums\/verify-files$/, handler: handleVerifyAllFiles },
+
+  { method: "GET", pattern: /^\/api\/admin\/photo\/([^/]+)$/, handler: handlePhotoExists },
+  { method: "POST", pattern: /^\/api\/admin\/photos\/gc$/, handler: handleGcPhotos },
 
   { method: "POST", pattern: /^\/api\/admin\/album$/, handler: handleCreateAlbum },
   { method: "PUT", pattern: /^\/api\/admin\/album\/([^/]+)$/, handler: handleUpdateAlbum },
   { method: "DELETE", pattern: /^\/api\/admin\/album\/([^/]+)$/, handler: handleDeleteAlbum },
 
-  { method: "POST", pattern: /^\/api\/admin\/album\/([^/]+)\/rebuild-files$/, handler: handleRebuildFiles },
+  { method: "POST", pattern: /^\/api\/admin\/album\/([^/]+)\/verify-files$/, handler: handleVerifyFiles },
   { method: "GET", pattern: /^\/api\/admin\/album\/([^/]+)\/files$/, handler: handleListFiles },
-  { method: "GET", pattern: /^\/api\/admin\/album\/([^/]+)\/raw\/(photos|preview)\/(.+)$/, handler: handleRawImage },
+  { method: "POST", pattern: /^\/api\/admin\/album\/([^/]+)\/files$/, handler: handleAttachFiles },
+  { method: "GET", pattern: /^\/api\/admin\/album\/([^/]+)\/raw\/(photos|preview)\/([^/]+)$/, handler: handleRawImage },
   { method: "POST", pattern: /^\/api\/admin\/album\/([^/]+)\/file$/, handler: handleUploadFile },
   { method: "PUT", pattern: /^\/api\/admin\/album\/([^/]+)\/file\/(.+)$/, handler: handleRenameFile },
   { method: "DELETE", pattern: /^\/api\/admin\/album\/([^/]+)\/file\/(.+)$/, handler: handleDeleteFile }
