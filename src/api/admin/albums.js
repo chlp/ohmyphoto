@@ -5,6 +5,7 @@ import { readJson } from '../../utils/http.js';
 import { bytesToHex } from '../../utils/crypto.js';
 import {
   albumExists,
+  getFileEntries,
   getInfoJson,
   infoKey,
   listAlbumIds,
@@ -33,7 +34,7 @@ export async function handleListAlbums({ env }) {
       title: String(r.info?.title || DEFAULT_TITLE),
       secretCount: r.secrets.length,
       secrets: r.secrets,
-      fileCount: Array.isArray(r.info?.files) ? r.info.files.length : 0
+      fileCount: getFileEntries(r.info).length
     };
   });
   return jsonNoStore({ albums: loaded.filter(Boolean) });

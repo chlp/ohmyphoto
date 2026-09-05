@@ -136,7 +136,7 @@ All under `/api/admin/`, Bearer session token required except `session`:
 | Method + path | Purpose |
 |---|---|
 | `POST session` | Exchange `ADMIN_TOKEN` for session token |
-| `GET albums` | List `{ albumId, title, secretCount, secrets, fileCount }` (delimiter listing + one `info.json` read per album) |
+| `GET albums` | List `{ albumId, title, secretCount, secrets, fileCount }` (delimiter listing + one `info.json` read per album; `fileCount` counts only valid entries, same as the gallery) |
 | `POST album` | Create `{ albumId, title?, secret? }`; secret auto-generated as 6 hex chars if omitted; 409 if exists |
 | `PUT album/<id>` | Update `{ title?, secrets?: string[], newAlbumId? }`. Rename = put new `info.json`, delete old, invalidate both DO caches; 409 if the destination exists |
 | `DELETE album/<id>` | Delete `info.json`; shared `photos/` objects are left for GC |
@@ -148,7 +148,7 @@ All under `/api/admin/`, Bearer session token required except `session`:
 | `PUT album/<id>/file/<name>` | Rename `{ newName }` — metadata-only; 409 if `newName` is taken |
 | `DELETE album/<id>/file/<name>` | Remove entry from `files`; the object stays |
 | `POST photos/gc` | `{ dryRun? (default true), cursor? }`. Walks `photos/` then `previews/` one list page (1000) per request, deletes objects not referenced by any `info.json` and older than `PHOTO_GC_GRACE_MS`; returns `{ done, cursor, orphanCount, orphans (≤200), deleted, ... }`. Client loops on `cursor` |
-| `POST album/<id>/verify-files` | `head()` every entry's objects; drop entries whose photo is missing, record/refresh each entry's `size`; `{ fileCount, removed, missingPreviewCount, sizeUpdated }`. No listing |
+| `POST album/<id>/verify-files` | Drop entries that are not valid `{ name, ref }` (e.g. bare-name entries from the pre-content-addressed layout, duplicates) and count them in `invalid`; `head()` every remaining entry's objects; drop entries whose photo is missing, record/refresh each entry's `size`; `{ fileCount, invalid, removed, missingPreviewCount, sizeUpdated }`. No listing |
 | `POST albums/verify-files` | Same for all albums |
 | `POST generate-album-id` | Workers AI: `{ description }` → `{ albumId, title }` |
 

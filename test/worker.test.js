@@ -270,7 +270,7 @@ describe("album lifecycle", () => {
     await env.BUCKET.put(infoKey, JSON.stringify(before));
 
     const r = await (await api(`/album/${albumId}/verify-files`, { method: "POST" })).json();
-    expect(r).toEqual({ ok: true, albumId, fileCount: 1, removed: ["gone.jpg"], missingPreviewCount: 1, sizeUpdated: 1 });
+    expect(r).toEqual({ ok: true, albumId, fileCount: 1, invalid: 0, removed: ["gone.jpg"], missingPreviewCount: 1, sizeUpdated: 1 });
     const info = await (await env.BUCKET.get(infoKey)).json();
     expect(info.files).toEqual([{ name: "kept.jpg", ref: await sha256(JPEG), size: JPEG.length }]);
     expect((await api(`/album/nope/verify-files`, { method: "POST" })).status).toBe(404);
@@ -279,6 +279,31 @@ describe("album lifecycle", () => {
     expect(all.ok).toBe(true);
     expect(all.albumsErr).toBe(0);
     expect(all.results.find((x) => x.albumId === albumId)).toMatchObject({ ok: true, fileCount: 1, removed: [] });
+  });
+
+  it("verify-files drops legacy/invalid entries and the album list counts only valid ones", async () => {
+    const albumId = "2025.06.04-legacy-string-files";
+    await api("/album", jsonInit("POST", { albumId, secret: "abc" }));
+    await api(`/album/${albumId}/file`, uploadForm("real.jpg"));
+    const infoKey = `albums/${albumId}/info.json`;
+    const info = await (await env.BUCKET.get(infoKey)).json();
+    // pre content-addressed layout: files were bare names; also a ref-less object and a duplicate
+    info.files = ["old1.jpg", "old2.jpg", { name: "noref.jpg" }, ...info.files, ...info.files];
+    await env.BUCKET.put(infoKey, JSON.stringify(info));
+    await api(`/album/${albumId}`, jsonInit("PUT", { title: "bust cache" }));
+
+    const list = await (await api("/albums")).json();
+    expect(list.albums.find((a) => a.albumId === albumId).fileCount).toBe(1);
+
+    const r = await (await api(`/album/${albumId}/verify-files`, { method: "POST" })).json();
+    expect(r).toMatchObject({ ok: true, fileCount: 1, invalid: 4, removed: [], sizeUpdated: 0 });
+    const after = await (await env.BUCKET.get(infoKey)).json();
+    expect(after.files).toEqual([{ name: "real.jpg", ref: await sha256(JPEG), size: JPEG.length }]);
+
+    const again = await (await api(`/album/${albumId}/verify-files`, { method: "POST" })).json();
+    expect(again).toMatchObject({ invalid: 0, removed: [], sizeUpdated: 0 });
+    const all = await (await api("/albums/verify-files", { method: "POST" })).json();
+    expect(all.totalInvalid).toBe(0);
   });
 
   it("gallery reports the ZIP download as unavailable while sizes are unknown", async () => {

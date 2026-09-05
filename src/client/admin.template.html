@@ -810,7 +810,7 @@
           filesStatusEl.textContent = `Verify error: ${resp.status}`;
           return;
         }
-        filesStatusEl.textContent = `Verified. files=${data.fileCount || 0}, removed=${(data.removed || []).length}, missingPreview=${data.missingPreviewCount || 0}`;
+        filesStatusEl.textContent = `Verified. files=${data.fileCount || 0}, invalid=${data.invalid || 0}, removed=${(data.removed || []).length}, missingPreview=${data.missingPreviewCount || 0}`;
         await refreshFiles().catch(() => {});
       } finally {
         if (btn) btn.disabled = false;
@@ -828,7 +828,7 @@
           statusEl.textContent = `Verify-all error: ${resp.status}`;
           return;
         }
-        statusEl.textContent = `Verified all. albums=${data.albumCount || 0}, err=${data.albumsErr || 0}, totalFiles=${data.totalFiles || 0}, removed=${data.totalRemoved || 0}, missingPreview=${data.totalMissingPreview || 0}`;
+        statusEl.textContent = `Verified all. albums=${data.albumCount || 0}, err=${data.albumsErr || 0}, totalFiles=${data.totalFiles || 0}, invalid=${data.totalInvalid || 0}, removed=${data.totalRemoved || 0}, missingPreview=${data.totalMissingPreview || 0}`;
         await refresh().catch(() => {});
       } finally {
         if (btn) btn.disabled = false;

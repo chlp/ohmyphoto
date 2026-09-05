@@ -43,15 +43,18 @@ async function refObjectsExist(env, ref) {
 }
 
 /**
- * Verify `files` of one album against storage: entries whose photos/<ref>.jpg is missing are
- * dropped, missing previews are counted, and each kept entry's `size` is (re)recorded from
- * the object. One head() pair per entry, no listing.
+ * Verify `files` of one album against storage: entries that are not `{ name, ref }` (or are
+ * duplicates by name) are dropped and counted in `invalid`, entries whose photos/<ref>.jpg is
+ * missing are dropped and listed in `removed`, missing previews are counted, and each kept
+ * entry's `size` is (re)recorded from the object. One head() pair per entry, no listing.
  */
 export async function verifyAlbumFiles(env, albumId) {
   const info = await getInfoJson(env, albumId);
   if (!info) return { ok: false, status: 404 };
 
+  const rawCount = Array.isArray(info.files) ? info.files.length : 0;
   const prev = getFileEntries(info);
+  const invalid = rawCount - prev.length;
   const status = await mapLimit(prev, 16, (e) => refObjectsExist(env, e.ref));
   const kept = prev.filter((_, i) => status[i].photo);
   const removed = prev.filter((_, i) => !status[i].photo).map((e) => e.name);
@@ -65,8 +68,8 @@ export async function verifyAlbumFiles(env, albumId) {
     return [{ ...e, size: status[i].size }];
   });
 
-  if (removed.length || sizeUpdated) await putInfoJson(env, albumId, withFileEntries(info, next));
-  return { ok: true, albumId, fileCount: kept.length, removed, missingPreviewCount, sizeUpdated };
+  if (invalid || removed.length || sizeUpdated) await putInfoJson(env, albumId, withFileEntries(info, next));
+  return { ok: true, albumId, fileCount: kept.length, invalid, removed, missingPreviewCount, sizeUpdated };
 }
 
 /** POST /api/admin/album/<albumId>/verify-files */
@@ -82,6 +85,7 @@ export async function handleVerifyAllFiles({ env }) {
   const albumIds = await listAlbumIds(env);
   const results = [];
   let totalFiles = 0;
+  let totalInvalid = 0;
   let totalRemoved = 0;
   let totalMissingPreview = 0;
   let albumsErr = 0;
@@ -90,6 +94,7 @@ export async function handleVerifyAllFiles({ env }) {
       const r = await verifyAlbumFiles(env, albumId);
       if (!r.ok) throw new Error("verify_failed");
       totalFiles += r.fileCount;
+      totalInvalid += r.invalid;
       totalRemoved += r.removed.length;
       totalMissingPreview += r.missingPreviewCount;
       results.push(r);
@@ -98,7 +103,7 @@ export async function handleVerifyAllFiles({ env }) {
       results.push({ ok: false, albumId });
     }
   }
-  return jsonNoStore({ ok: true, albumCount: albumIds.length, albumsErr, totalFiles, totalRemoved, totalMissingPreview, results });
+  return jsonNoStore({ ok: true, albumCount: albumIds.length, albumsErr, totalFiles, totalInvalid, totalRemoved, totalMissingPreview, results });
 }
 
 /** GET /api/admin/album/<albumId>/files */
