@@ -6,61 +6,204 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Admin | OhMyPhoto</title>
   <meta name="robots" content="noindex,nofollow" />
+  <link rel="icon" href="/favicon-32x32.png" sizes="32x32" />
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
-    input, textarea, button { font: inherit; }
-    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 12px 0; }
-    .muted { color: #666; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
-    textarea { width: 100%; min-height: 80px; }
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --border-strong: #d1d5db;
+      --text: #111827;
+      --muted: #6b7280;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-soft: #eef2ff;
+      --danger: #dc2626;
+      --danger-hover: #b91c1c;
+      --danger-soft: #fef2f2;
+      --warn-soft: #fef3c7;
+      --warn-text: #92400e;
+      --radius: 10px;
+      --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .06);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+    input, textarea, button, select { font: inherit; color: inherit; }
+    a { color: var(--primary); }
+    h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+    h2 { font-size: 16px; font-weight: 600; margin: 0; }
+    h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 5px; font-size: 13px; }
+    .muted { color: var(--muted); }
     .small { font-size: 12px; }
-    .danger { background: #b42318; color: #fff; border: 0; padding: 8px 12px; border-radius: 6px; }
-    .primary { background: #175cd3; color: #fff; border: 0; padding: 8px 12px; border-radius: 6px; }
-    .ghost { background: #fff; border: 1px solid #ccc; padding: 8px 12px; border-radius: 6px; }
-    .genBtn { min-width: 112px; }
-    code { background: #f6f6f6; padding: 2px 4px; border-radius: 4px; }
-    .hidden { display: none; }
-    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-    .thumb { width: 100%; height: 160px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; background: #fafafa; }
-    .fileCard { border: 1px solid #eee; border-radius: 10px; padding: 12px; }
-    .fileActions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .albumLinks { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
-    .albumLinks a { font-size: 12px; color: #175cd3; text-decoration: none; }
-    .albumLinks a:hover { text-decoration: underline; }
-    .albumLinkItem { display: inline-flex; gap: 6px; align-items: center; }
+    .hidden { display: none !important; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .grow { flex: 1; min-width: 0; }
+
+    /* ---- Top bar ---- */
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      background: rgba(255, 255, 255, .92);
+      backdrop-filter: saturate(160%) blur(8px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      max-width: 1200px; margin: 0 auto; padding: 10px 20px;
+      display: flex; align-items: center; gap: 18px;
+    }
+    .brand { font-weight: 700; color: var(--text); text-decoration: none; white-space: nowrap; }
+    .brand span { color: var(--muted); font-weight: 500; }
+    .nav { display: flex; gap: 4px; }
+    .nav a {
+      color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 8px; font-weight: 500;
+    }
+    .nav a:hover { color: var(--text); background: #f3f4f6; }
+    .nav a.active { color: var(--primary); background: var(--primary-soft); }
+    .topbar-right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+
+    /* ---- Layout ---- */
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 18px 20px; margin-bottom: 16px; box-shadow: var(--shadow);
+    }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .card-head .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .page-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+    .page-head .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+    .back {
+      display: inline-flex; align-items: center; gap: 4px; color: var(--muted); text-decoration: none;
+      padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: #fff; white-space: nowrap;
+    }
+    .back:hover { color: var(--text); background: #f9fafb; }
+    .status { min-height: 18px; margin-top: 8px; }
+
+    /* ---- Controls ---- */
+    input:not([type=checkbox]):not([type=file]), textarea, select {
+      border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; background: #fff; width: 100%;
+    }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); }
+    textarea { min-height: 88px; resize: vertical; }
+    button {
+      border-radius: 8px; padding: 8px 14px; border: 1px solid transparent; cursor: pointer; font-weight: 500;
+      white-space: nowrap; line-height: 1.3;
+    }
+    button:disabled { opacity: .55; cursor: default; }
+    .primary { background: var(--primary); color: #fff; }
+    .primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .danger { background: var(--danger); color: #fff; }
+    .danger:hover:not(:disabled) { background: var(--danger-hover); }
+    .ghost { background: #fff; border-color: var(--border-strong); }
+    .ghost:hover:not(:disabled) { background: #f9fafb; }
+    .ghost.dangerText { color: var(--danger); }
+    .sm { padding: 5px 10px; font-size: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .field > label { font-size: 12px; color: var(--muted); font-weight: 500; }
+    .field-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 12px; }
+    .field-row .field { flex: 1; margin-bottom: 0; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .hint.bad { color: var(--danger); }
+    .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+
+    /* ---- Table ---- */
+    .tableWrap { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600;
+      padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap;
+    }
+    td { padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: 0; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: #f9fafb; }
+    td.num { text-align: right; white-space: nowrap; }
+    th.num { text-align: right; }
+    .albumIdCell a { color: var(--text); font-weight: 600; text-decoration: none; }
+    .albumIdCell a:hover { color: var(--primary); }
+    .albumTitle { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .badge {
+      display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #f3f4f6; color: #374151;
+      font-weight: 500; white-space: nowrap;
+    }
+    .badge.warn { background: var(--warn-soft); color: var(--warn-text); }
+    .badge.bad { background: var(--danger-soft); color: var(--danger-hover); }
+    .empty { padding: 32px 10px; text-align: center; color: var(--muted); }
+
+    /* ---- Login ---- */
+    .loginWrap { min-height: calc(100vh - 40px); display: grid; place-items: center; }
+    .loginCard { width: 100%; max-width: 380px; padding: 28px; }
+    .loginCard h1 { margin-bottom: 4px; }
+    .loginCard p { margin: 0 0 18px; }
+    .loginCard form { display: flex; flex-direction: column; gap: 10px; }
+
+    /* ---- Files grid ---- */
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    .thumb { width: 100%; aspect-ratio: 4 / 3; height: auto; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); background: #f3f4f6; display: block; }
+    .fileCard { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; background: #fff; }
+    .fileCard input { margin-top: 8px; font-size: 12px; padding: 6px 8px; }
+    .fileActions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+    .fileActions .ref { margin-left: auto; font-size: 11px; color: var(--muted); }
+    .fileCard.pick { cursor: pointer; }
+    .fileCard.pick.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, .2); }
+    .dropzone { border: 1px dashed var(--border-strong); border-radius: var(--radius); padding: 14px; background: #fafafa; transition: border-color .15s, background .15s; }
+    .dropzone.dragover { border-color: var(--primary); background: var(--primary-soft); }
+    details.section > summary { cursor: pointer; user-select: none; font-weight: 600; padding: 4px 0; list-style: none; }
+    details.section > summary::before { content: "▸"; display: inline-block; width: 16px; color: var(--muted); }
+    details.section[open] > summary::before { content: "▾"; }
+    details.section > summary::-webkit-details-marker { display: none; }
+
+    /* ---- Share links + QR ---- */
+    .albumLinks { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+    .albumLinkItem { display: inline-flex; gap: 8px; align-items: flex-start; }
+    .albumLinkItem > a { font-size: 13px; text-decoration: none; padding: 4px 0; }
+    .albumLinkItem > a:hover { text-decoration: underline; }
     .qrDetails { display: inline-block; }
-    .qrDetails > summary { cursor: pointer; user-select: none; font-size: 11px; color: #666; }
-    .qrDetails[open] > summary { color: #111; }
+    .qrDetails > summary { cursor: pointer; user-select: none; font-size: 12px; color: var(--muted); padding: 4px 0; list-style: none; }
+    .qrDetails > summary::-webkit-details-marker { display: none; }
+    .qrDetails[open] > summary { color: var(--text); }
     .qrBox {
-      width: 112px;
-      height: 112px;
-      display: grid;
-      place-items: center;
-      margin-top: 6px;
-      border: 1px solid #eee;
-      border-radius: 10px;
-      background: #fff;
-      overflow: hidden;
+      width: 128px; height: 128px; display: grid; place-items: center; margin-top: 6px;
+      border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden;
     }
-    /* Force the generated canvas/svg to fit inside the box */
-    .qrBox canvas,
-    .qrBox svg,
-    .qrBox img {
-      width: 100% !important;
-      height: 100% !important;
-      display: block;
-    }
+    .qrBox canvas, .qrBox svg, .qrBox img { width: 100% !important; height: 100% !important; display: block; }
     .qrActions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; justify-content: center; }
-    .qrActions button { font-size: 11px; padding: 5px 8px; border-radius: 6px; }
+    .qrActions button { font-size: 11px; padding: 4px 8px; border-radius: 6px; }
+    .shareLinkFull { font-size: 12px; margin-top: 8px; word-break: break-all; }
+
+    /* ---- Danger zone ---- */
+    .dangerZone { border-color: #fecaca; }
+    .dangerZone h2 { color: var(--danger-hover); }
+
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      background: #111827; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px;
+      max-width: min(720px, 92vw); z-index: 100; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); white-space: pre-line;
+    }
+    .toast.error { background: var(--danger-hover); }
+    .toast.ok { background: #047857; }
+
+    @media (max-width: 720px) {
+      .container { padding: 12px; }
+      .card { padding: 14px; }
+      .topbar-inner { padding: 8px 12px; gap: 10px; }
+      .topbar-right .small { display: none; }
+      .page-head .actions { margin-left: 0; width: 100%; }
+      th.opt, td.opt { display: none; }
+    }
   </style>
 </head>
 <body>
-  <h1>OhMyPhoto Admin</h1>
-
   <!-- Turnstile containers:
        - Invisible/offscreen is used first (no UI).
        - Modal is shown only if invisible execution can't get a token (likely needs interaction; common on iOS Safari). -->
@@ -75,148 +218,232 @@
     </div>
   </div>
 
-  <div class="card">
-    <h2>Auth</h2>
-    <div class="row">
-      <label class="small muted" for="token">Admin token:</label>
-      <input id="token" type="password" placeholder="ADMIN_TOKEN" style="min-width:280px" />
-      <button class="ghost" id="saveToken">Login</button>
-      <button class="ghost" id="logout">Logout</button>
+  <header class="topbar hidden" id="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/">OhMyPhoto <span>Admin</span></a>
+      <nav class="nav">
+        <a href="#/" data-nav="albums">Albums</a>
+        <a href="#/trash" data-nav="trash">Trash</a>
+      </nav>
+      <div class="topbar-right">
+        <span class="muted small" id="authInfo"></span>
+        <button class="ghost sm" id="logout">Log out</button>
+      </div>
     </div>
-    <div class="muted small" id="authInfo"></div>
-  </div>
+  </header>
 
-  <div class="card">
-    <h2>Create album</h2>
-    <div class="row" style="align-items:flex-end;">
-      <div style="flex:1;min-width:520px;">
-        <label class="small muted" for="newAlbumDesc">AI description (optional):</label>
-        <input id="newAlbumDesc" placeholder="семья на пляже" style="width:100%;" />
-      </div>
-      <button class="ghost genBtn" id="genAlbumIdBtn" title="Generate a short album id (slug) via Workers AI">Generate</button>
-    </div>
-    <div class="muted small" id="genAlbumIdStatus" style="margin-top:6px;"></div>
-    <div class="row" style="align-items:flex-end;margin-top:10px;">
-      <div style="flex:1;min-width:520px;">
-        <label class="small muted" for="newAlbumId">Album ID:</label>
-        <input id="newAlbumId" placeholder="2025.12.25-sunny-family-beach" class="mono" style="width:100%;" />
-      </div>
-    </div>
-    <div class="row" style="align-items:flex-end;margin-top:10px;">
-      <div style="flex:1;min-width:420px;">
-        <label class="small muted" for="newTitle">Title:</label>
-        <input id="newTitle" placeholder="OhMyPhoto" style="width:100%;" />
-      </div>
-    </div>
-    <div class="row" style="align-items:flex-end;margin-top:10px;">
-      <div style="flex:1;min-width:520px;">
-        <label class="small muted" for="newSecret">Secret:</label>
-        <input id="newSecret" class="mono" placeholder="optional, min 16 chars (a-zA-Z0-9_-); empty = generated" style="width:100%;" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
-      </div>
-      <button class="ghost genBtn" id="genSecretBtn" title="Generate a random secret">Generate</button>
-    </div>
-    <div class="row" style="margin-top:10px;">
-      <button class="primary" id="createBtn">Create</button>
-    </div>
-  </div>
+  <main class="container" id="main">
 
-  <div class="card" id="albumsCard">
-    <div class="row" style="justify-content: space-between;">
-      <h2 style="margin:0">Albums</h2>
-      <div class="row">
-        <button class="ghost" id="gcBtn" title="Find shared photos no album references any more (dry run first, then confirm delete)">GC orphans</button>
-        <button class="ghost" id="verifyAllFilesBtn" title="Check that every photo of every album exists in storage; drop broken entries">Verify files (all)</button>
-        <button class="ghost" id="trashBtn" title="Deleted albums: their info.json is kept in trash/ and can be restored">Trash</button>
-        <button class="ghost" id="refreshBtn">Refresh</button>
+    <!-- ===== Login ===== -->
+    <section class="view hidden" id="view-login">
+      <div class="loginWrap">
+        <div class="card loginCard">
+          <h1>OhMyPhoto Admin</h1>
+          <p class="muted">Enter the admin token to continue.</p>
+          <form id="loginForm">
+            <input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="current-password" autofocus />
+            <button class="primary" id="saveToken" type="submit">Log in</button>
+          </form>
+          <div class="status muted small" id="loginStatus"></div>
+        </div>
       </div>
-    </div>
-    <div id="status" class="muted small"></div>
-    <div style="overflow:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>albumId</th>
-            <th>title</th>
-            <th>secrets (one per line)</th>
-            <th>rename</th>
-            <th>photos</th>
-            <th>actions</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </div>
-  </div>
+    </section>
 
-  <div class="card hidden" id="trashCard">
-    <div class="row" style="justify-content: space-between;">
-      <h2 style="margin:0">Trash</h2>
-      <div class="row">
-        <button class="ghost" id="trashBackBtn">Back</button>
-        <button class="ghost" id="trashRefreshBtn">Refresh</button>
+    <!-- ===== Albums list ===== -->
+    <section class="view hidden" id="view-albums">
+      <div class="page-head">
+        <h1>Albums</h1>
+        <span class="muted small" id="status"></span>
+        <div class="actions">
+          <button class="ghost" id="gcBtn" title="Find shared photos no album references any more (dry run first, then confirm delete)">GC orphans</button>
+          <button class="ghost" id="verifyAllFilesBtn" title="Check that every photo of every album exists in storage; drop broken entries">Verify files (all)</button>
+          <button class="ghost" id="refreshBtn">Refresh</button>
+          <a class="primary" href="#/new" role="button" style="display:inline-block;text-decoration:none;padding:8px 14px;border-radius:8px;">New album</a>
+        </div>
       </div>
-    </div>
-    <div class="muted small" style="margin:8px 0;">Deleting an album keeps its <code>info.json</code> here. Restore puts it back (optionally under a new ID). Photos referenced only by a trashed album are still collected by <b>GC orphans</b>.</div>
-    <div id="trashStatus" class="muted small"></div>
-    <div style="overflow:auto;">
-      <table>
-        <thead><tr><th>albumId</th><th>deleted at</th><th>restore as</th><th>actions</th></tr></thead>
-        <tbody id="trashTbody"></tbody>
-      </table>
-    </div>
-  </div>
+      <div class="card" style="padding:0 4px;">
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Album</th>
+                <th class="num">Photos</th>
+                <th class="opt">Secrets</th>
+                <th>Share</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
-  <div class="card hidden" id="editorCard">
-    <div class="row" style="justify-content: space-between;">
-      <div>
-        <h2 style="margin:0">Edit album: <code id="editAlbumId" class="mono"></code></h2>
-        <div class="muted small" id="filesStatus"></div>
+    <!-- ===== New album ===== -->
+    <section class="view hidden" id="view-new">
+      <div class="page-head">
+        <a class="back" href="#/">← Albums</a>
+        <h1>New album</h1>
       </div>
-      <div class="row">
-        <button class="ghost" id="backToAlbumsBtn">Back</button>
-        <button class="ghost" id="refreshFilesBtn">Refresh files</button>
-        <button class="ghost" id="verifyFilesBtn" title="Check that every photo of this album exists in storage; drop broken entries">Verify files</button>
+      <div class="card" style="max-width:760px;">
+        <div class="field-row">
+          <div class="field">
+            <label for="newAlbumDesc">Describe the album (optional, any language) and let AI suggest an ID and a title</label>
+            <input id="newAlbumDesc" placeholder="семья на пляже" />
+          </div>
+          <button class="ghost" id="genAlbumIdBtn" title="Generate a short album id (slug) via Workers AI">Generate</button>
+        </div>
+        <div class="hint" id="genAlbumIdStatus" style="margin:-6px 0 12px;"></div>
+        <div class="field">
+          <label for="newAlbumId">Album ID</label>
+          <input id="newAlbumId" placeholder="2025.12.25-sunny-family-beach" class="mono" />
+          <div class="hint">Becomes part of the link: <code>/&lt;album-id&gt;#&lt;secret&gt;</code>. Letters, digits, <code>.</code> <code>_</code> <code>-</code>.</div>
+        </div>
+        <div class="field">
+          <label for="newTitle">Title</label>
+          <input id="newTitle" placeholder="OhMyPhoto" />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="newSecret">Secret</label>
+            <input id="newSecret" class="mono" placeholder="leave empty to generate" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+          </div>
+          <button class="ghost" id="genSecretBtn" title="Generate a random secret">Generate</button>
+        </div>
+        <div class="hint" style="margin:-6px 0 14px;">At least 16 characters (a-z A-Z 0-9 _ -). The secret also signs every photo URL, so a short one can be brute-forced from a single leaked link.</div>
+        <div class="row">
+          <button class="primary" id="createBtn">Create album</button>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div class="card" style="margin-top:12px;">
-      <h3 style="margin-top:0;">Upload photos</h3>
-      <div class="row">
-        <input id="uploadInput" type="file" accept="image/*" multiple />
-        <label class="row small muted" style="gap:6px;">
-          <input id="overwriteUpload" type="checkbox" />
-          overwrite existing
-        </label>
-        <button class="primary" id="uploadBtn">Upload selected</button>
+    <!-- ===== Album page ===== -->
+    <section class="view hidden" id="view-album">
+      <div class="page-head">
+        <a class="back" href="#/">← Albums</a>
+        <div class="grow">
+          <h1 id="albumHeadTitle"></h1>
+          <div class="muted small mono" id="editAlbumId"></div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="refreshFilesBtn">Refresh</button>
+          <button class="ghost" id="verifyFilesBtn" title="Check that every photo of this album exists in storage; drop broken entries">Verify files</button>
+        </div>
       </div>
-      <div class="muted small" id="uploadStatus"></div>
-    </div>
 
-    <div class="card" style="margin-top:12px;">
-      <h3 style="margin-top:0;">Add photos from another album</h3>
-      <div class="muted small" style="margin-bottom:8px;">Photos are stored once and shared between albums; this only adds references, nothing is copied.</div>
-      <div class="row">
-        <select id="srcAlbumSelect" style="min-width:320px;"></select>
-        <button class="ghost" id="srcLoadBtn">Load</button>
-        <button class="ghost" id="srcSelectAllBtn">Select all</button>
-        <button class="primary" id="srcAddBtn">Add selected</button>
+      <div class="card">
+        <div class="card-head">
+          <h2>Share</h2>
+          <span class="muted small">One link per secret. Open the link or download the QR code.</span>
+        </div>
+        <div class="albumLinks" id="albumLinks"></div>
       </div>
-      <div class="muted small" id="srcStatus"></div>
-      <div id="srcFilesGrid" class="grid" style="margin-top:10px;"></div>
-    </div>
 
-    <h3>Files</h3>
-    <div id="filesGrid" class="grid"></div>
-  </div>
+      <div class="card" id="photosCard">
+        <div class="card-head">
+          <h2 id="photosHead">Photos</h2>
+          <span class="muted small" id="filesStatus"></span>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+          <div class="row">
+            <input id="uploadInput" type="file" accept="image/*" multiple style="flex:1;min-width:200px;" />
+            <label class="check">
+              <input id="overwriteUpload" type="checkbox" />
+              overwrite existing names
+            </label>
+            <button class="primary" id="uploadBtn">Upload</button>
+          </div>
+          <div class="hint">Drop files here or choose them. Any image format; converted in the browser to JPEG 3000px + 1000px preview. Photos already uploaded anywhere are attached without re-uploading.</div>
+          <div class="status muted small" id="uploadStatus"></div>
+        </div>
+
+        <details class="section" id="srcDetails" style="margin-top:14px;">
+          <summary>Add photos from another album</summary>
+          <div style="padding:10px 0 0 16px;">
+            <div class="hint" style="margin:0 0 8px;">Photos are stored once and shared between albums; this only adds references, nothing is copied.</div>
+            <div class="row">
+              <select id="srcAlbumSelect" style="max-width:360px;"></select>
+              <button class="ghost" id="srcLoadBtn">Load</button>
+              <button class="ghost" id="srcSelectAllBtn">Select all</button>
+              <button class="primary" id="srcAddBtn">Add selected</button>
+            </div>
+            <div class="status muted small" id="srcStatus"></div>
+            <div id="srcFilesGrid" class="grid" style="margin-top:10px;"></div>
+          </div>
+        </details>
+
+        <div id="filesGrid" class="grid" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Settings</h2>
+        </div>
+        <div class="field">
+          <label for="editTitle">Title</label>
+          <input id="editTitle" placeholder="OhMyPhoto" />
+        </div>
+        <div class="field">
+          <label for="editSecrets">Secrets (one per line)</label>
+          <textarea id="editSecrets" class="mono" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"></textarea>
+          <div class="hint" id="editSecretsHint"></div>
+          <div class="row" style="margin-top:6px;">
+            <button class="ghost sm" id="addSecretBtn" type="button" title="Append a new random secret (save to apply)">+ generated secret</button>
+            <span class="hint" style="margin:0;">To rotate: add a new one, share the new link, then remove the old.</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="editRename">Rename album ID (optional)</label>
+          <input id="editRename" class="mono" placeholder="new-album-id" />
+          <div class="hint">Instant, nothing is copied. Old links stop working immediately.</div>
+        </div>
+        <div class="row">
+          <button class="primary" id="saveAlbumBtn">Save</button>
+          <span class="status muted small" id="saveStatus" style="margin:0;"></span>
+        </div>
+      </div>
+
+      <div class="card dangerZone">
+        <div class="card-head">
+          <h2>Delete album</h2>
+          <button class="danger" id="deleteAlbumBtn">Delete album</button>
+        </div>
+        <div class="muted small">The album goes to <a href="#/trash">Trash</a> and can be restored. Photos stay in shared storage; run <b>GC orphans</b> to reclaim space.</div>
+      </div>
+    </section>
+
+    <!-- ===== Trash ===== -->
+    <section class="view hidden" id="view-trash">
+      <div class="page-head">
+        <a class="back" href="#/">← Albums</a>
+        <h1>Trash</h1>
+        <span class="muted small" id="trashStatus"></span>
+        <div class="actions">
+          <button class="ghost" id="trashRefreshBtn">Refresh</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="muted small" style="margin-bottom:12px;">Deleting an album keeps its <code>info.json</code> here. Restore puts it back (optionally under a new ID). Photos referenced only by a trashed album are still collected by <b>GC orphans</b>.</div>
+        <div class="tableWrap">
+          <table>
+            <thead><tr><th>Album</th><th>Deleted</th><th>Restore as</th><th></th></tr></thead>
+            <tbody id="trashTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script>
     const $ = (id) => document.getElementById(id);
     const tokenEl = $('token');
     const statusEl = $('status');
+    const loginStatusEl = $('loginStatus');
     const authInfoEl = $('authInfo');
     const genAlbumIdStatusEl = $('genAlbumIdStatus');
-    const albumsCardEl = $('albumsCard');
-    const editorCardEl = $('editorCard');
     const editAlbumIdEl = $('editAlbumId');
     const filesStatusEl = $('filesStatus');
     const filesGridEl = $('filesGrid');
@@ -245,7 +472,18 @@
 
     let currentEditAlbumId = '';
     let currentEditSecret = '';
-    let lastAlbums = []; // last /api/admin/albums result (used by the "add from album" picker)
+    let lastAlbums = []; // last /api/admin/albums result (album page, "add from album" picker)
+
+    // ---- Toast ----
+    let toastTimer = null;
+    function notify(msg, kind = 'info', ms) {
+      const el = $('toast');
+      el.textContent = String(msg || '');
+      el.className = `toast ${kind}`;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.add('hidden'), ms || (kind === 'error' ? 9000 : 3500));
+    }
+    const errText = (e) => String(e && e.message ? e.message : e);
 
     // Storage wrapper: iOS Safari (especially Private Mode / some WebViews) can throw on localStorage access.
     const __memoryStore = Object.create(null);
@@ -390,13 +628,14 @@
       }
     }
 
+    // ---- Session ----
     function getSessionToken() {
       return safeStorageGet('ohmyphoto_admin_session') || '';
     }
     function setSessionToken(t) {
       const r = safeStorageSet('ohmyphoto_admin_session', String(t || ''));
       if (r.where === 'memory') {
-        authInfoEl.textContent = 'Logged in, but your browser blocks storage (iOS Private Mode/WebView). Session will not persist after refresh.';
+        notify('Logged in, but your browser blocks storage (iOS Private Mode/WebView). The session will not survive a refresh.', 'error');
       }
     }
     function clearSessionToken() {
@@ -410,63 +649,67 @@
       return base64UrlDecodeToJson(parts[0]);
     }
 
+    /** Returns true if a usable session exists; drops stale/invalid ones and updates the login hint. */
     function enforceSessionFreshness() {
       const t = getSessionToken();
       if (!t) {
-        authInfoEl.textContent = 'No session. Please login.';
-        return;
+        return false;
       }
       const payload = getSessionPayload(t);
       if (!payload || typeof payload.iat !== 'number' || typeof payload.exp !== 'number') {
         clearSessionToken();
-        authInfoEl.textContent = 'Invalid session. Please login again.';
-        return;
+        loginStatusEl.textContent = 'Invalid session. Please log in again.';
+        return false;
       }
       const now = Date.now();
       if (payload.exp <= now) {
         clearSessionToken();
-        authInfoEl.textContent = 'Session expired. Please login again.';
-        return;
+        loginStatusEl.textContent = 'Session expired. Please log in again.';
+        return false;
       }
       const ageMs = now - payload.iat;
       const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
       if (ageMs > fiveDaysMs) {
         clearSessionToken();
-        authInfoEl.textContent = 'Session is old. Please login again.';
-        return;
+        loginStatusEl.textContent = 'Session is old. Please log in again.';
+        return false;
       }
       const hoursLeft = Math.max(0, Math.floor((payload.exp - now) / (60 * 60 * 1000)));
-      authInfoEl.textContent = `Session OK. ~${hoursLeft}h left.`;
+      const d = Math.floor(hoursLeft / 24), h = hoursLeft % 24;
+      authInfoEl.textContent = `Session: ${d ? `${d}d ` : ''}${h}h left`;
+      return true;
     }
-
-    enforceSessionFreshness();
 
     $('logout').onclick = () => {
       clearSessionToken();
-      authInfoEl.textContent = 'Logged out. Please login.';
-      refresh().catch(() => {});
+      lastAlbums = [];
+      loginStatusEl.textContent = 'Logged out.';
+      route();
     };
 
-    $('saveToken').onclick = async () => {
+    $('loginForm').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const btn = $('saveToken');
       try {
         const adminToken = tokenEl.value || '';
         if (!adminToken) {
-          statusEl.textContent = 'Enter admin token.';
+          loginStatusEl.textContent = 'Enter the admin token.';
           return;
         }
+        btn.disabled = true;
 
         // iOS can silently block storage (Private Mode/WebViews). Preflight to avoid "nothing happens".
         const storageProbe = safeStorageSet('__ohmyphoto_storage_probe__', '1');
         safeStorageRemove('__ohmyphoto_storage_probe__');
         if (storageProbe.where === 'memory') {
-          authInfoEl.textContent = 'Your browser blocks storage (common on iOS Private Mode/WebView). Login will work, but won’t persist after refresh.';
+          loginStatusEl.textContent = 'Your browser blocks storage (common on iOS Private Mode/WebView). Login will work, but won’t persist after refresh.';
         }
 
-        statusEl.textContent = 'Logging in...';
+        loginStatusEl.textContent = 'Logging in...';
         const turnstileToken = await getTurnstileTokenOnce();
         if (TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY !== 'YOUR_TURNSTILE_SITE_KEY' && !turnstileToken) {
           // Server may not require it, but if it does, this will otherwise look like a no-op on iOS.
-          statusEl.textContent = 'Verification not completed. If you are on iOS Safari, disable Private Mode / content blockers and try again.';
+          loginStatusEl.textContent = 'Verification not completed. If you are on iOS Safari, disable Private Mode / content blockers and try again.';
         }
 
         const resp = await fetch('/api/admin/session', {
@@ -477,32 +720,41 @@
 
         if (!resp.ok) {
           const t = await resp.text().catch(() => '');
-          statusEl.textContent = `Login failed: ${resp.status}${t ? ` (${t.slice(0, 120)})` : ''}`;
+          loginStatusEl.textContent = resp.status === 401 || resp.status === 403
+            ? 'Wrong token.'
+            : `Login failed: ${resp.status}${t ? ` (${t.slice(0, 120)})` : ''}`;
           return;
         }
 
         const data = await resp.json().catch(() => null);
         if (!data || !data.sessionToken) {
-          statusEl.textContent = 'Login failed: no session token';
+          loginStatusEl.textContent = 'Login failed: no session token';
           return;
         }
 
         setSessionToken(data.sessionToken);
         tokenEl.value = '';
-        enforceSessionFreshness();
-        statusEl.textContent = 'Logged in.';
-        await refresh();
+        loginStatusEl.textContent = '';
+        await route();
       } catch (e) {
-        statusEl.textContent = `Login error: ${String(e && e.message ? e.message : e)}`;
+        loginStatusEl.textContent = `Login error: ${errText(e)}`;
+      } finally {
+        btn.disabled = false;
       }
     };
 
     async function api(path, options = {}) {
-      enforceSessionFreshness();
       const token = getSessionToken();
       const headers = { ...(options.headers || {}) };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      return fetch(path, { ...options, headers });
+      const resp = await fetch(path, { ...options, headers });
+      if (resp.status === 401) {
+        // Session rejected by the server: drop it and fall back to the login screen.
+        clearSessionToken();
+        loginStatusEl.textContent = 'Session rejected by the server. Please log in again.';
+        route();
+      }
+      return resp;
     }
 
     function parseSecrets(text) {
@@ -511,6 +763,46 @@
         .map(s => s.trim())
         .filter(Boolean);
     }
+
+    // ---- Router (hash based: the Assets binding serves /admin.html only for that path) ----
+    const VIEWS = ['login', 'albums', 'new', 'album', 'trash'];
+    function showView(name) {
+      for (const v of VIEWS) $(`view-${v}`).classList.toggle('hidden', v !== name);
+      $('topbar').classList.toggle('hidden', name === 'login');
+      if (name !== 'album') document.title = 'Admin | OhMyPhoto';
+      for (const a of document.querySelectorAll('.nav a')) {
+        a.classList.toggle('active', a.dataset.nav === name || (a.dataset.nav === 'albums' && (name === 'new' || name === 'album')));
+      }
+    }
+    function parseRoute() {
+      const h = decodeURIComponent(location.hash.replace(/^#/, '')) || '/';
+      if (h === '/new') return { name: 'new' };
+      if (h === '/trash') return { name: 'trash' };
+      const m = h.match(/^\/album\/(.+)$/);
+      if (m) return { name: 'album', albumId: m[1] };
+      return { name: 'albums' };
+    }
+    const albumHash = (id) => `#/album/${encodeURIComponent(id)}`;
+    let routeSeq = 0;
+    async function route() {
+      const seq = ++routeSeq;
+      if (!enforceSessionFreshness()) {
+        showView('login');
+        try { tokenEl.focus(); } catch {}
+        return;
+      }
+      const r = parseRoute();
+      showView(r.name);
+      try {
+        if (r.name === 'albums') await refresh();
+        else if (r.name === 'trash') await refreshTrash();
+        else if (r.name === 'album') await openAlbum(r.albumId, seq);
+        else if (r.name === 'new') { try { $('newAlbumDesc').focus(); } catch {} }
+      } catch (e) {
+        notify(errText(e), 'error');
+      }
+    }
+    window.addEventListener('hashchange', route);
 
     // Styled QR (browser-only) via ESM CDN import (no server-side generation)
     // Vendored ESM build (keeps admin working without external CDNs)
@@ -580,7 +872,11 @@
       }
     }
 
-    function renderAlbumLinks(containerEl, albumId, secrets) {
+    /**
+     * Renders one "open" link (+ lazy QR with PNG/SVG download) per secret.
+     * opts.copy adds a "copy link" button and shows the full URL (album page).
+     */
+    function renderAlbumLinks(containerEl, albumId, secrets, opts = {}) {
       if (!containerEl) return;
       containerEl.innerHTML = '';
       const id = String(albumId || '').trim();
@@ -594,25 +890,46 @@
         if (uniq.includes(v)) continue;
         uniq.push(v);
       }
-      if (uniq.length === 0) return;
+      if (uniq.length === 0) {
+        if (opts.emptyText) {
+          const e = document.createElement('span');
+          e.className = 'muted small';
+          e.textContent = opts.emptyText;
+          containerEl.appendChild(e);
+        }
+        return;
+      }
 
       for (let i = 0; i < uniq.length; i++) {
         const sec = uniq[i];
         const wrap = document.createElement('span');
         wrap.className = 'albumLinkItem';
-
-        const a = document.createElement('a');
         // Public album URL format: /<albumId>#<secret>
         // IMPORTANT: do not encode secret here; the viewer reads it verbatim from location.hash.
-        a.href = `/${encodeURIComponent(id)}#${sec}`;
+        const path = `/${encodeURIComponent(id)}#${sec}`;
+        const fullUrl = `${location.origin}${path}`;
+
+        const a = document.createElement('a');
+        a.href = path;
         a.target = '_blank';
         a.rel = 'noreferrer';
         a.textContent = uniq.length === 1 ? 'open' : `open ${i + 1}`;
-        a.title = `/${id}#${sec}`;
+        a.title = fullUrl;
         wrap.appendChild(a);
 
+        if (opts.copy) {
+          const cp = document.createElement('button');
+          cp.className = 'ghost sm';
+          cp.type = 'button';
+          cp.textContent = 'copy link';
+          cp.onclick = async () => {
+            try { await navigator.clipboard.writeText(fullUrl); notify('Link copied', 'ok'); }
+            catch { notify(fullUrl, 'info', 8000); }
+          };
+          wrap.appendChild(cp);
+        }
+
         // Styled QR code (lazy-loaded) for this public URL
-        const fullUrl = `${location.origin}/${encodeURIComponent(id)}#${sec}`;
         const d = document.createElement('details');
         d.className = 'qrDetails';
         const s = document.createElement('summary');
@@ -652,27 +969,16 @@
         });
         wrap.appendChild(d);
 
+        if (opts.copy && isWeakSecret(sec)) {
+          const b = document.createElement('span');
+          b.className = 'badge warn';
+          b.title = `Shorter than ${MIN_SECRET_LENGTH} characters`;
+          b.textContent = 'weak';
+          wrap.appendChild(b);
+        }
+
         containerEl.appendChild(wrap);
       }
-    }
-
-    function showEditor(albumId, secret) {
-      currentEditAlbumId = String(albumId || '');
-      currentEditSecret = String(secret || '');
-      editAlbumIdEl.textContent = currentEditAlbumId;
-      albumsCardEl.classList.add('hidden');
-      editorCardEl.classList.remove('hidden');
-      filesGridEl.innerHTML = '';
-      filesStatusEl.textContent = '';
-      uploadStatusEl.textContent = '';
-      uploadInputEl.value = '';
-    }
-
-    function hideEditor() {
-      currentEditAlbumId = '';
-      currentEditSecret = '';
-      editorCardEl.classList.add('hidden');
-      albumsCardEl.classList.remove('hidden');
     }
 
     // Must match src/utils/crypto.js:imageSig — HMAC-SHA256(key = secret, msg = "albumId:ref"), hex.
@@ -733,28 +1039,274 @@
       });
     }
 
-    async function refreshFiles() {
-      if (!currentEditAlbumId) return;
-      if (!currentEditSecret) {
-        filesStatusEl.textContent = 'Error: album has no secrets. Add at least one secret and Save.';
+    // ---- Album list ----
+    /** Fetches every page of /api/admin/albums into `lastAlbums`. */
+    async function loadAlbums(onProgress) {
+      const albums = [];
+      let cursor = null;
+      do {
+        const resp = await api(`/api/admin/albums${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { method: 'GET' });
+        if (!resp.ok) throw new Error(`Could not load albums: HTTP ${resp.status}`);
+        const data = await resp.json();
+        albums.push(...(data.albums || []));
+        cursor = data.done ? null : data.cursor;
+        if (cursor && onProgress) onProgress(albums.length);
+      } while (cursor);
+      lastAlbums = albums;
+      fillSrcAlbumSelect();
+      return albums;
+    }
+
+    async function refresh() {
+      statusEl.textContent = 'Loading...';
+      try {
+        await loadAlbums((n) => { statusEl.textContent = `Loading... ${n} albums`; });
+      } catch (e) {
+        statusEl.textContent = errText(e);
         return;
       }
-      filesStatusEl.textContent = 'Loading files...';
+      renderAlbumsTable();
+    }
+
+    function renderAlbumsTable() {
+      const albums = lastAlbums;
+      const tbody = $('tbody');
+      tbody.innerHTML = '';
+      if (!albums.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.className = 'empty';
+        td.innerHTML = 'No albums yet. <a href="#/new">Create the first one</a>.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        statusEl.textContent = '';
+        return;
+      }
+      for (const a of albums) {
+        const tr = document.createElement('tr');
+        tr.className = 'clickable';
+        tr.onclick = (ev) => {
+          if (ev.target.closest('a, button, details, input, summary')) return;
+          location.hash = albumHash(a.albumId);
+        };
+
+        const tdId = document.createElement('td');
+        tdId.className = 'albumIdCell';
+        const idLink = document.createElement('a');
+        idLink.href = albumHash(a.albumId);
+        idLink.className = 'mono';
+        idLink.textContent = a.albumId;
+        tdId.appendChild(idLink);
+        const t = document.createElement('div');
+        t.className = 'albumTitle';
+        t.textContent = a.title || 'OhMyPhoto';
+        tdId.appendChild(t);
+        tr.appendChild(tdId);
+
+        const tdCount = document.createElement('td');
+        tdCount.className = 'num';
+        tdCount.textContent = String(a.fileCount || 0);
+        tr.appendChild(tdCount);
+
+        const tdSecrets = document.createElement('td');
+        tdSecrets.className = 'opt';
+        const secrets = a.secrets || [];
+        const weak = secrets.filter(isWeakSecret).length;
+        const badge = document.createElement('span');
+        badge.className = 'badge' + (!secrets.length ? ' bad' : weak ? ' warn' : '');
+        badge.textContent = !secrets.length ? 'no secrets' : `${secrets.length}${weak ? `, ${weak} weak` : ''}`;
+        badge.title = weak ? `${weak} secret(s) shorter than ${MIN_SECRET_LENGTH} chars` : '';
+        tdSecrets.appendChild(badge);
+        tr.appendChild(tdSecrets);
+
+        const tdLinks = document.createElement('td');
+        const links = document.createElement('div');
+        links.className = 'albumLinks';
+        renderAlbumLinks(links, a.albumId, secrets);
+        tdLinks.appendChild(links);
+        tr.appendChild(tdLinks);
+
+        const tdOpen = document.createElement('td');
+        tdOpen.className = 'num';
+        const openBtn = document.createElement('a');
+        openBtn.href = albumHash(a.albumId);
+        openBtn.className = 'ghost sm';
+        openBtn.style.cssText = 'display:inline-block;text-decoration:none;color:inherit;';
+        openBtn.textContent = 'Manage →';
+        tdOpen.appendChild(openBtn);
+        tr.appendChild(tdOpen);
+
+        tbody.appendChild(tr);
+      }
+      statusEl.textContent = `${albums.length} album${albums.length === 1 ? '' : 's'}`;
+    }
+
+    // ---- Album page ----
+    const editTitleEl = $('editTitle');
+    const editSecretsEl = $('editSecrets');
+    const editSecretsHintEl = $('editSecretsHint');
+    const editRenameEl = $('editRename');
+    let editOriginalSecrets = [];
+
+    function updateEditSecretsHint() {
+      const list = parseSecrets(editSecretsEl.value);
+      const weak = list.filter(isWeakSecret).length;
+      const bad = list.filter((x) => !isValidSecret(x)).length;
+      let text = `${list.length} secret${list.length === 1 ? '' : 's'}`;
+      if (!list.length) text += '. Without a secret nobody can open the album and photos cannot be shown here.';
+      if (weak) text += `. ${weak} weak (< ${MIN_SECRET_LENGTH} chars): still works, but replace it.`;
+      if (bad) text += `. ${bad} invalid (allowed: a-z A-Z 0-9 _ -).`;
+      editSecretsHintEl.textContent = text;
+      editSecretsHintEl.className = 'hint' + (weak || bad || !list.length ? ' bad' : '');
+      renderAlbumLinks($('albumLinks'), currentEditAlbumId, list, { copy: true, emptyText: 'Add a secret in Settings below and save to get a share link.' });
+    }
+    editSecretsEl.addEventListener('input', updateEditSecretsHint);
+    $('addSecretBtn').onclick = () => {
+      const list = parseSecrets(editSecretsEl.value);
+      list.push(generateSecret());
+      editSecretsEl.value = list.join('\n');
+      updateEditSecretsHint();
+    };
+
+    /** Renders the album page for `albumId`; loads the album list first if it is not cached. */
+    async function openAlbum(albumId, seq) {
+      const id = String(albumId || '');
+      const changed = id !== currentEditAlbumId;
+      let album = lastAlbums.find((a) => a.albumId === id);
+      if (!album) {
+        filesStatusEl.textContent = 'Loading...';
+        await loadAlbums();
+        if (seq !== routeSeq) return; // navigated away meanwhile
+        album = lastAlbums.find((a) => a.albumId === id);
+      }
+      if (!album) {
+        notify(`Album "${id}" not found.`, 'error');
+        location.hash = '#/';
+        return;
+      }
+      currentEditAlbumId = id;
+      currentEditSecret = (album.secrets || [])[0] || '';
+      editOriginalSecrets = (album.secrets || []).slice();
+      editAlbumIdEl.textContent = id;
+      $('albumHeadTitle').textContent = album.title || 'OhMyPhoto';
+      document.title = `${id} | OhMyPhoto Admin`;
+      editTitleEl.value = album.title || 'OhMyPhoto';
+      editSecretsEl.value = (album.secrets || []).join('\n');
+      editRenameEl.value = '';
+      $('saveStatus').textContent = '';
+      updateEditSecretsHint();
+      fillSrcAlbumSelect();
+      if (changed) {
+        filesGridEl.innerHTML = '';
+        uploadStatusEl.textContent = '';
+        uploadInputEl.value = '';
+        $('srcFilesGrid').innerHTML = '';
+        $('srcStatus').textContent = '';
+        $('srcDetails').open = false;
+        srcSelected = new Map();
+      }
+      await refreshFiles();
+    }
+
+    async function saveAlbumSettings() {
+      if (!currentEditAlbumId) return;
+      const id = currentEditAlbumId;
+      const btn = $('saveAlbumBtn');
+      const status = $('saveStatus');
+      const secrets = parseSecrets(editSecretsEl.value);
+      const bad = secrets.filter((x) => !isValidSecret(x));
+      if (bad.length) return notify(`Invalid secret: ${bad[0]}. Allowed: a-z A-Z 0-9 _ - (max 256 chars).`, 'error');
+      const weakNew = secrets.filter((x) => isWeakSecret(x) && !editOriginalSecrets.includes(x));
+      if (weakNew.length) return notify(`New secret "${weakNew[0]}" is too short: at least ${MIN_SECRET_LENGTH} characters.`, 'error');
+      if (!secrets.length && !confirm('Save with no secrets? Nobody will be able to open this album until you add one.')) return;
+
+      const payload = { title: editTitleEl.value.trim() || 'OhMyPhoto', secrets };
+      const newId = editRenameEl.value.trim();
+      if (newId && newId !== id) payload.newAlbumId = newId;
+
+      btn.disabled = true;
+      status.textContent = 'Saving...';
+      try {
+        // An album is just its info.json; rename included, this is a single request.
+        const r = await api(`/api/admin/album/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!r.ok) {
+          const t = await r.text().catch(() => '');
+          status.textContent = '';
+          notify(`Save failed: ${r.status} ${t.slice(0, 200)}`, 'error');
+          return;
+        }
+        status.textContent = '';
+        notify(payload.newAlbumId ? `Saved and renamed to ${payload.newAlbumId}` : 'Saved', 'ok');
+        await loadAlbums();
+        const targetId = payload.newAlbumId || id;
+        if (payload.newAlbumId) {
+          currentEditAlbumId = '';
+          history.replaceState(null, '', albumHash(targetId));
+        }
+        await openAlbum(targetId, routeSeq);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function deleteCurrentAlbum() {
+      const id = currentEditAlbumId;
+      if (!id) return;
+      if (!confirm(`Delete album "${id}"?\n\nIt moves to Trash and can be restored. Photos stay in shared storage (run "GC orphans" to reclaim space).`)) return;
+      const r = await api(`/api/admin/album/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!r.ok) {
+        notify(`Delete failed: ${r.status}`, 'error');
+        return;
+      }
+      notify(`Album "${id}" moved to Trash`, 'ok');
+      lastAlbums = lastAlbums.filter((a) => a.albumId !== id);
+      currentEditAlbumId = '';
+      location.hash = '#/';
+    }
+
+    async function refreshFiles() {
+      if (!currentEditAlbumId) return;
+      const id = currentEditAlbumId;
       filesGridEl.innerHTML = '';
-      const resp = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, { method: 'GET' });
+      if (!currentEditSecret) {
+        filesStatusEl.textContent = '';
+        $('photosHead').textContent = 'Photos';
+        const e = document.createElement('div');
+        e.className = 'empty';
+        e.textContent = 'This album has no secrets, so photo previews cannot be signed. Add a secret in Settings and save.';
+        filesGridEl.appendChild(e);
+        return;
+      }
+      filesStatusEl.textContent = 'Loading...';
+      const resp = await api(`/api/admin/album/${encodeURIComponent(id)}/files`, { method: 'GET' });
+      if (id !== currentEditAlbumId) return;
       if (!resp.ok) {
         filesStatusEl.textContent = `Error: ${resp.status}`;
         return;
       }
       const data = await resp.json();
       const files = data.files || [];
-      filesStatusEl.textContent = `Files: ${files.length}`;
+      $('photosHead').textContent = `Photos (${files.length})`;
+      filesStatusEl.textContent = '';
+      if (!files.length) {
+        const e = document.createElement('div');
+        e.className = 'empty';
+        e.textContent = 'No photos yet. Upload some above.';
+        filesGridEl.appendChild(e);
+        return;
+      }
 
       for (const f of files) {
         const card = document.createElement('div');
         card.className = 'fileCard';
 
-        const { preview: previewSignedUrl, photo: photoSignedUrl } = await signedUrls(currentEditAlbumId, f.ref, currentEditSecret);
+        const { preview: previewSignedUrl, photo: photoSignedUrl } = await signedUrls(id, f.ref, currentEditSecret);
+        if (id !== currentEditAlbumId) return;
 
         const imgLink = document.createElement('a');
         imgLink.href = photoSignedUrl;
@@ -770,65 +1322,63 @@
         imgLink.appendChild(img);
         card.appendChild(imgLink);
 
-        const nameRow = document.createElement('div');
-        nameRow.className = 'row';
-        nameRow.style.marginTop = '10px';
-
         const nameInput = document.createElement('input');
         nameInput.value = f.name;
-        nameInput.style.flex = '1';
         nameInput.className = 'mono';
-        nameRow.appendChild(nameInput);
-        card.appendChild(nameRow);
+        nameInput.title = 'Edit and press Rename (or Enter). The order in the gallery follows the name.';
+        card.appendChild(nameInput);
 
         const actions = document.createElement('div');
         actions.className = 'fileActions';
-        actions.style.marginTop = '8px';
 
         const renameBtn = document.createElement('button');
-        renameBtn.className = 'ghost';
+        renameBtn.className = 'ghost sm';
         renameBtn.textContent = 'Rename';
-        renameBtn.onclick = async () => {
+        const doRename = async () => {
           const newName = nameInput.value.trim();
-          if (!newName) return alert('new name required');
-          const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/file/${encodeURIComponent(f.name)}`, {
+          if (!newName) return notify('New name required', 'error');
+          if (newName === f.name) return;
+          const r = await api(`/api/admin/album/${encodeURIComponent(id)}/file/${encodeURIComponent(f.name)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ newName })
           });
           if (!r.ok) {
             const t = await r.text();
-            alert(`Rename failed: ${r.status} ${t}`);
+            notify(`Rename failed: ${r.status} ${t}`, 'error');
             return;
           }
+          notify(`Renamed to ${newName}`, 'ok');
           await refreshFiles();
         };
+        renameBtn.onclick = () => doRename().catch((e) => notify(errText(e), 'error'));
+        nameInput.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); renameBtn.click(); } };
 
         const delBtn = document.createElement('button');
-        delBtn.className = 'danger';
-        delBtn.textContent = 'Delete';
+        delBtn.className = 'ghost sm dangerText';
+        delBtn.textContent = 'Remove';
         delBtn.onclick = async () => {
           if (!confirm(`Remove "${f.name}" from this album? (the photo stays in shared storage until GC)`)) return;
-          const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/file/${encodeURIComponent(f.name)}`, {
+          const r = await api(`/api/admin/album/${encodeURIComponent(id)}/file/${encodeURIComponent(f.name)}`, {
             method: 'DELETE'
           });
           if (!r.ok) {
             const t = await r.text();
-            alert(`Delete failed: ${r.status} ${t}`);
+            notify(`Remove failed: ${r.status} ${t}`, 'error');
             return;
           }
           await refreshFiles();
         };
 
+        const note = document.createElement('span');
+        note.className = 'ref mono';
+        note.title = f.ref || '';
+        note.textContent = String(f.ref).slice(0, 8);
+
         actions.appendChild(renameBtn);
         actions.appendChild(delBtn);
+        actions.appendChild(note);
         card.appendChild(actions);
-
-        const note = document.createElement('div');
-        note.className = 'muted small mono';
-        note.title = f.ref || '';
-        note.textContent = `ref ${String(f.ref).slice(0, 12)}…`;
-        card.appendChild(note);
 
         filesGridEl.appendChild(card);
       }
@@ -864,12 +1414,12 @@
       if (btn) btn.disabled = true;
       try {
         const r = await verifyAlbumPaged(currentEditAlbumId, (p) => {
-          filesStatusEl.textContent = `Verifying files... ${p.checked} checked`;
+          filesStatusEl.textContent = `Verifying... ${p.checked} checked`;
         });
         await refreshFiles().catch(() => {});
-        filesStatusEl.textContent = `Verified. files=${r.fileCount}, invalid=${r.invalid}, removed=${r.removed.length}, missingPreview=${r.missingPreviewCount}, sizeUpdated=${r.sizeUpdated}`;
+        filesStatusEl.textContent = `Verified: ${r.fileCount} files, ${r.invalid} invalid, ${r.removed.length} removed, ${r.missingPreviewCount} missing previews, ${r.sizeUpdated} sizes updated`;
       } catch (e) {
-        filesStatusEl.textContent = `Verify error: ${String(e && e.message || e)}`;
+        filesStatusEl.textContent = `Verify error: ${errText(e)}`;
       } finally {
         if (btn) btn.disabled = false;
       }
@@ -900,7 +1450,7 @@
           }
         }
         await refresh().catch(() => {});
-        statusEl.textContent = `Verified all. albums=${albums.length}, err=${total.err}, totalFiles=${total.files}, invalid=${total.invalid}, removed=${total.removed}, missingPreview=${total.missingPreview}, sizeUpdated=${total.sizeUpdated}`;
+        statusEl.textContent = `Verified ${albums.length} albums: ${total.files} files, ${total.invalid} invalid, ${total.removed} removed, ${total.missingPreview} missing previews, ${total.sizeUpdated} sizes updated${total.err ? `, ${total.err} errors` : ''}`;
       } finally {
         if (btn) btn.disabled = false;
       }
@@ -908,80 +1458,103 @@
 
     async function uploadSelected() {
       if (!currentEditAlbumId) return;
+      const albumId = currentEditAlbumId;
       const list = Array.from(uploadInputEl.files || []);
-      if (!list.length) return alert('Select files first');
+      if (!list.length) return notify('Select files first', 'error');
       const overwrite = $('overwriteUpload').checked;
+      const btn = $('uploadBtn');
+      btn.disabled = true;
       uploadStatusEl.textContent = `Processing ${list.length} file(s)...`;
 
       let reused = 0;
       const failed = []; // [fileName, reason]
-      for (let i = 0; i < list.length; i++) {
-        const file = list[i];
-        const outName = normalizeUploadName(file.name);
+      try {
+        for (let i = 0; i < list.length; i++) {
+          const file = list[i];
+          const outName = normalizeUploadName(file.name);
 
-        // De-duplication: if this exact source file was uploaded before (any album), just attach it.
-        uploadStatusEl.textContent = `(${i + 1}/${list.length}) Hashing ${file.name} ...`;
-        let ref = '';
-        try {
-          ref = await sha256HexOfFile(file);
-          if (!overwrite) {
-            const chk = await api(`/api/admin/photo/${ref}`, { method: 'GET' });
-            const st = chk.ok ? await chk.json() : null;
-            if (st && st.exists && st.hasPreview) {
-              const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ files: [{ name: outName, ref }] })
-              });
-              if (r.ok) { reused += 1; continue; }
-              if (r.status !== 409) {
-                failed.push([file.name, `attach ${r.status} ${await r.text()}`]);
-                continue;
+          // De-duplication: if this exact source file was uploaded before (any album), just attach it.
+          uploadStatusEl.textContent = `(${i + 1}/${list.length}) Hashing ${file.name} ...`;
+          let ref = '';
+          try {
+            ref = await sha256HexOfFile(file);
+            if (!overwrite) {
+              const chk = await api(`/api/admin/photo/${ref}`, { method: 'GET' });
+              const st = chk.ok ? await chk.json() : null;
+              if (st && st.exists && st.hasPreview) {
+                const r = await api(`/api/admin/album/${encodeURIComponent(albumId)}/files`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ files: [{ name: outName, ref }] })
+                });
+                if (r.ok) { reused += 1; continue; }
+                if (r.status !== 409) {
+                  failed.push([file.name, `attach ${r.status} ${await r.text()}`]);
+                  continue;
+                }
+                // 409: name taken by a different photo -> fall through to the normal upload (which also 409s unless overwrite)
               }
-              // 409: name taken by a different photo -> fall through to the normal upload (which also 409s unless overwrite)
             }
+          } catch (e) {
+            console.warn('hash/dedupe check failed, uploading normally', e);
+            ref = '';
           }
-        } catch (e) {
-          console.warn('hash/dedupe check failed, uploading normally', e);
-          ref = '';
-        }
 
-        uploadStatusEl.textContent = `(${i + 1}/${list.length}) Converting ${file.name} -> ${outName} ...`;
-        let photoBlob, previewBlob;
-        try {
-          photoBlob = await toJpegBlob(file, 3000);
-          previewBlob = await toJpegBlob(file, 1000);
-        } catch (e) {
-          console.error(e);
-          failed.push([file.name, `cannot decode (HEIC/RAW are not supported by this browser): ${String(e && e.message || e)}`]);
-          continue;
-        }
+          uploadStatusEl.textContent = `(${i + 1}/${list.length}) Converting ${file.name} -> ${outName} ...`;
+          let photoBlob, previewBlob;
+          try {
+            photoBlob = await toJpegBlob(file, 3000);
+            previewBlob = await toJpegBlob(file, 1000);
+          } catch (e) {
+            console.error(e);
+            failed.push([file.name, `cannot decode (HEIC/RAW are not supported by this browser): ${errText(e)}`]);
+            continue;
+          }
 
-        const fd = new FormData();
-        fd.append('name', outName);
-        fd.append('overwrite', overwrite ? '1' : '0');
-        if (ref) fd.append('ref', ref);
-        fd.append('photo', new File([photoBlob], outName, { type: 'image/jpeg' }));
-        fd.append('preview', new File([previewBlob], outName, { type: 'image/jpeg' }));
+          const fd = new FormData();
+          fd.append('name', outName);
+          fd.append('overwrite', overwrite ? '1' : '0');
+          if (ref) fd.append('ref', ref);
+          fd.append('photo', new File([photoBlob], outName, { type: 'image/jpeg' }));
+          fd.append('preview', new File([previewBlob], outName, { type: 'image/jpeg' }));
 
-        uploadStatusEl.textContent = `(${i + 1}/${list.length}) Uploading ${outName} ...`;
-        const r = await api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/file`, {
-          method: 'POST',
-          body: fd
-        });
-        if (!r.ok) {
-          failed.push([file.name, `upload ${r.status} ${await r.text()}`]);
+          uploadStatusEl.textContent = `(${i + 1}/${list.length}) Uploading ${outName} ...`;
+          const r = await api(`/api/admin/album/${encodeURIComponent(albumId)}/file`, {
+            method: 'POST',
+            body: fd
+          });
+          if (!r.ok) {
+            failed.push([file.name, `upload ${r.status} ${await r.text()}`]);
+          }
         }
+      } finally {
+        btn.disabled = false;
       }
 
       const okCount = list.length - failed.length;
-      let msg = `Upload complete: ${okCount}/${list.length} file(s)`;
+      let msg = `Uploaded ${okCount}/${list.length} file(s)`;
       if (reused) msg += `, ${reused} already existed and were attached without re-uploading`;
       if (failed.length) msg += `. Failed (${failed.length}): ` + failed.map(([n, why]) => `${n} (${why})`).join('; ');
       uploadStatusEl.textContent = msg;
+      notify(failed.length ? `${failed.length} file(s) failed, see the upload status` : msg, failed.length ? 'error' : 'ok');
       if (!failed.length) uploadInputEl.value = '';
-      await refreshFiles();
+      if (albumId === currentEditAlbumId) await refreshFiles();
     }
+
+    // Drag & drop onto the upload zone
+    (() => {
+      const dz = $('dropzone');
+      dz.addEventListener('dragover', (ev) => { ev.preventDefault(); dz.classList.add('dragover'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+      dz.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        dz.classList.remove('dragover');
+        const files = ev.dataTransfer && ev.dataTransfer.files;
+        if (!files || !files.length) return;
+        try { uploadInputEl.files = files; } catch { return notify('Drop is not supported in this browser, use the file picker.', 'error'); }
+        uploadStatusEl.textContent = `${files.length} file(s) ready. Press Upload.`;
+      });
+    })();
 
     // ---- Add photos from another album (reference only, no copies) ----
     let srcSelected = new Map(); // ref -> name
@@ -1015,12 +1588,11 @@
       const files = (await resp.json()).files || [];
       const srcAlbum = lastAlbums.find((a) => a.albumId === srcId);
       const srcSecret = srcAlbum && (srcAlbum.secrets || [])[0] || '';
-      status.textContent = files.length ? `${files.length} photo(s). Tick the ones to add.` : 'That album has no photos.';
+      status.textContent = files.length ? `${files.length} photo(s). Click the ones to add.` : 'That album has no photos.';
 
       for (const f of files) {
         const card = document.createElement('label');
-        card.className = 'fileCard';
-        card.style.cursor = 'pointer';
+        card.className = 'fileCard pick';
         if (srcSecret) {
           const { preview } = await signedUrls(srcId, f.ref, srcSecret);
           const img = document.createElement('img');
@@ -1036,7 +1608,10 @@
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.dataset.ref = f.ref;
-        cb.onchange = () => { if (cb.checked) srcSelected.set(f.ref, f.name); else srcSelected.delete(f.ref); };
+        cb.onchange = () => {
+          if (cb.checked) srcSelected.set(f.ref, f.name); else srcSelected.delete(f.ref);
+          card.classList.toggle('selected', cb.checked);
+        };
         row.appendChild(cb);
         const nm = document.createElement('span');
         nm.className = 'mono small';
@@ -1057,7 +1632,7 @@
       if (!currentEditAlbumId) return;
       const status = $('srcStatus');
       const files = [...srcSelected].map(([ref, name]) => ({ name, ref }));
-      if (!files.length) return alert('Select photos first');
+      if (!files.length) return notify('Select photos first', 'error');
       // The server accepts ATTACH_CHUNK entries per request (one head() each). Chunks that hit a
       // name conflict are collected and re-sent with overwrite after one confirmation.
       const postChunk = (chunk, overwrite) => api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, {
@@ -1096,7 +1671,11 @@
         }
       }
       status.textContent = `Added ${added} photo(s).`;
-      for (const cb of $('srcFilesGrid').querySelectorAll('input[type=checkbox]')) cb.checked = false;
+      notify(`Added ${added} photo(s)`, 'ok');
+      for (const cb of $('srcFilesGrid').querySelectorAll('input[type=checkbox]')) {
+        cb.checked = false;
+        cb.closest('.fileCard') && cb.closest('.fileCard').classList.remove('selected');
+      }
       srcSelected = new Map();
       await refreshFiles();
     }
@@ -1136,19 +1715,16 @@
         if (!confirm(`Delete ${dry.orphans} unreferenced object(s)?\n\n${dry.sample.join('\n')}${more}`)) { statusEl.textContent = 'GC cancelled.'; return; }
         const real = await gcWalk(false);
         statusEl.textContent = `GC done: ${real.deleted} object(s) deleted.`;
+        notify(statusEl.textContent, 'ok');
       } catch (e) {
-        statusEl.textContent = String(e && e.message || e);
+        statusEl.textContent = errText(e);
+        notify(errText(e), 'error');
       } finally {
         if (btn) btn.disabled = false;
       }
     }
 
     // ---- Trash (deleted albums' info.json) ----
-    function showTrash(show) {
-      $('trashCard').classList.toggle('hidden', !show);
-      albumsCardEl.classList.toggle('hidden', show);
-    }
-
     async function refreshTrash() {
       const status = $('trashStatus');
       const tbody = $('trashTbody');
@@ -1158,7 +1734,17 @@
       if (!resp.ok) { status.textContent = `Error: ${resp.status}`; return; }
       const data = await resp.json();
       const items = data.items || [];
-      status.textContent = items.length ? `${items.length} trashed album(s)${data.truncated ? ' (showing the first 1000)' : ''}` : 'Trash is empty.';
+      status.textContent = items.length ? `${items.length} trashed album(s)${data.truncated ? ' (showing the first 1000)' : ''}` : '';
+      if (!items.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'empty';
+        td.textContent = 'Trash is empty.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
       for (const t of items) {
         const tr = document.createElement('tr');
         const tdId = document.createElement('td');
@@ -1172,11 +1758,13 @@
         const asInput = document.createElement('input');
         asInput.className = 'mono';
         asInput.placeholder = t.albumId;
+        asInput.style.maxWidth = '260px';
         tdAs.appendChild(asInput);
         tr.appendChild(tdAs);
         const tdActions = document.createElement('td');
+        tdActions.className = 'num';
         const restoreBtn = document.createElement('button');
-        restoreBtn.className = 'primary';
+        restoreBtn.className = 'primary sm';
         restoreBtn.textContent = 'Restore';
         restoreBtn.onclick = async () => {
           const albumId = asInput.value.trim();
@@ -1185,17 +1773,18 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(albumId ? { key: t.key, albumId } : { key: t.key })
           });
-          if (!r.ok) { alert(`Restore failed: ${r.status} ${(await r.text()).slice(0, 200)}`); return; }
+          if (!r.ok) { notify(`Restore failed: ${r.status} ${(await r.text()).slice(0, 200)}`, 'error'); return; }
+          notify(`Restored as ${albumId || t.albumId}`, 'ok');
+          lastAlbums = [];
           await refreshTrash();
-          await refresh().catch(() => {});
         };
         const dropBtn = document.createElement('button');
-        dropBtn.className = 'danger';
+        dropBtn.className = 'ghost sm dangerText';
         dropBtn.textContent = 'Delete forever';
         dropBtn.onclick = async () => {
-          if (!confirm(`Permanently delete the trashed metadata of "${t.albumId}" (${t.deletedAt})? Photos are not affected.`)) return;
+          if (!confirm(`Permanently delete the trashed metadata of "${t.albumId}" (${new Date(t.deletedAt).toLocaleString()})? Photos are not affected.`)) return;
           const r = await api(`/api/admin/trash/${encodeURIComponent(t.key)}`, { method: 'DELETE' });
-          if (!r.ok) { alert(`Delete failed: ${r.status}`); return; }
+          if (!r.ok) { notify(`Delete failed: ${r.status}`, 'error'); return; }
           await refreshTrash();
         };
         tdActions.appendChild(restoreBtn);
@@ -1206,215 +1795,63 @@
       }
     }
 
-    async function refresh() {
-      statusEl.textContent = 'Loading...';
-      // The list is paged (PAGE_ALBUMS per request); follow `cursor` until `done`.
-      const albums = [];
-      let cursor = null;
-      do {
-        const resp = await api(`/api/admin/albums${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { method: 'GET' });
-        if (resp.status === 401) {
-          statusEl.textContent = 'Unauthorized (401). Set ADMIN_TOKEN.';
-          $('tbody').innerHTML = '';
-          return;
-        }
-        if (!resp.ok) {
-          statusEl.textContent = `Error: ${resp.status}`;
-          return;
-        }
-        const data = await resp.json();
-        albums.push(...(data.albums || []));
-        cursor = data.done ? null : data.cursor;
-        if (cursor) statusEl.textContent = `Loading... ${albums.length} albums`;
-      } while (cursor);
-      lastAlbums = albums;
-      fillSrcAlbumSelect();
-
-      const tbody = $('tbody');
-      tbody.innerHTML = '';
-      for (const a of albums) {
-        const tr = document.createElement('tr');
-
-        const tdId = document.createElement('td');
-        tdId.textContent = a.albumId;
-        tr.appendChild(tdId);
-
-        const tdTitle = document.createElement('td');
-        const titleInput = document.createElement('input');
-        titleInput.value = a.title || 'OhMyPhoto';
-        titleInput.style.minWidth = '220px';
-        tdTitle.appendChild(titleInput);
-        const links = document.createElement('div');
-        links.className = 'albumLinks';
-        tdTitle.appendChild(links);
-        tr.appendChild(tdTitle);
-
-        const tdSecrets = document.createElement('td');
-        const secretsArea = document.createElement('textarea');
-        secretsArea.placeholder = '';
-        // Prevent password managers / autofill extensions from trying to hook into this field.
-        // Some extensions inject buggy content scripts and can crash on focus.
-        secretsArea.setAttribute('autocomplete', 'off');
-        secretsArea.setAttribute('autocorrect', 'off');
-        secretsArea.setAttribute('autocapitalize', 'none');
-        secretsArea.setAttribute('spellcheck', 'false');
-        secretsArea.setAttribute('inputmode', 'text');
-        secretsArea.setAttribute('data-lpignore', 'true');   // LastPass
-        secretsArea.setAttribute('data-1p-ignore', 'true');  // 1Password
-        secretsArea.setAttribute('data-bwignore', 'true');   // Bitwarden
-        secretsArea.setAttribute('data-form-type', 'other'); // generic hint for some autofill engines
-        // Prefill existing secrets (one per line)
-        secretsArea.value = (a.secrets || []).join('\n');
-        tdSecrets.appendChild(secretsArea);
-        const hint = document.createElement('div');
-        hint.className = 'muted small';
-        const updateSecretsHint = () => {
-          const list = parseSecrets(secretsArea.value);
-          const weak = list.filter(isWeakSecret).length;
-          const bad = list.filter((x) => !isValidSecret(x)).length;
-          hint.textContent = `Count: ${list.length}` + (weak ? `. ${weak} weak (< ${MIN_SECRET_LENGTH} chars): add a generated one, share the new link, then remove the old.` : '') + (bad ? `. ${bad} invalid (allowed: a-z A-Z 0-9 _ -)` : '');
-          hint.style.color = weak || bad ? '#b42318' : '';
-        };
-        updateSecretsHint();
-        tdSecrets.appendChild(hint);
-        const addSecretBtn = document.createElement('button');
-        addSecretBtn.className = 'ghost small';
-        addSecretBtn.type = 'button';
-        addSecretBtn.textContent = '+ generated secret';
-        addSecretBtn.title = 'Append a new random secret (save to apply)';
-        addSecretBtn.onclick = () => {
-          const list = parseSecrets(secretsArea.value);
-          list.push(generateSecret());
-          secretsArea.value = list.join('\n');
-          secretsArea.dispatchEvent(new Event('input'));
-        };
-        tdSecrets.appendChild(addSecretBtn);
-        tr.appendChild(tdSecrets);
-
-        // Render public links next to the title (one per secret)
-        renderAlbumLinks(links, a.albumId, parseSecrets(secretsArea.value));
-        secretsArea.addEventListener('input', () => {
-          updateSecretsHint();
-          renderAlbumLinks(links, a.albumId, parseSecrets(secretsArea.value));
-        });
-
-        const tdRename = document.createElement('td');
-        const renameInput = document.createElement('input');
-        renameInput.placeholder = 'new-album-id';
-        tdRename.appendChild(renameInput);
-        tr.appendChild(tdRename);
-
-        const tdPhotos = document.createElement('td');
-        const editBtn = document.createElement('button');
-        editBtn.className = 'ghost';
-        editBtn.textContent = `Edit (${a.fileCount || 0})`;
-        editBtn.onclick = async () => {
-          const secret = (a.secrets || [])[0] || '';
-          if (!secret) {
-            alert('Album has no secrets. Add at least one secret and Save first.');
-            return;
-          }
-          showEditor(a.albumId, secret);
-          fillSrcAlbumSelect();
-          $('srcFilesGrid').innerHTML = '';
-          $('srcStatus').textContent = '';
-          await refreshFiles();
-        };
-        tdPhotos.appendChild(editBtn);
-        tr.appendChild(tdPhotos);
-
-        const tdActions = document.createElement('td');
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'primary';
-        saveBtn.textContent = 'Save';
-        saveBtn.onclick = async () => {
-          const payload = { title: titleInput.value || 'OhMyPhoto' };
-          // Always send secrets (allows clearing); textarea is prefilled from server.
-          payload.secrets = parseSecrets(secretsArea.value);
-          if (renameInput.value.trim()) payload.newAlbumId = renameInput.value.trim();
-          // An album is just its info.json; rename included, this is a single request.
-          saveBtn.disabled = true;
-          try {
-            const r = await api(`/api/admin/album/${encodeURIComponent(a.albumId)}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-            if (!r.ok) {
-              const t = await r.text().catch(() => '');
-              alert(`Save failed: ${r.status} ${t.slice(0, 200)}`);
-              return;
-            }
-          } finally {
-            saveBtn.disabled = false;
-          }
-          await refresh();
-        };
-
-        const delBtn = document.createElement('button');
-        delBtn.className = 'danger';
-        delBtn.textContent = 'Delete';
-        delBtn.onclick = async () => {
-          if (!confirm(`Delete album "${a.albumId}"? Its photos stay in shared storage (run "GC orphans" to reclaim space).`)) return;
-          const r = await api(`/api/admin/album/${encodeURIComponent(a.albumId)}`, { method: 'DELETE' });
-          if (!r.ok) {
-            alert(`Delete failed: ${r.status}`);
-            return;
-          }
-          await refresh();
-        };
-
-        tdActions.appendChild(saveBtn);
-        tdActions.appendChild(document.createTextNode(' '));
-        tdActions.appendChild(delBtn);
-        tr.appendChild(tdActions);
-
-        tbody.appendChild(tr);
-      }
-      statusEl.textContent = `Albums: ${albums.length}`;
-    }
-
+    // ---- Wiring ----
     $('refreshBtn').onclick = refresh;
-    $('trashBtn').onclick = () => { showTrash(true); refreshTrash().catch((e) => { $('trashStatus').textContent = String(e); }); };
-    $('trashBackBtn').onclick = () => showTrash(false);
-    $('trashRefreshBtn').onclick = () => refreshTrash().catch((e) => { $('trashStatus').textContent = String(e); });
-    $('verifyAllFilesBtn').onclick = () => verifyAllFiles().catch(() => {});
-    $('backToAlbumsBtn').onclick = () => hideEditor();
-    $('refreshFilesBtn').onclick = () => refreshFiles().catch(() => {});
+    $('trashRefreshBtn').onclick = () => refreshTrash().catch((e) => { $('trashStatus').textContent = errText(e); });
+    $('verifyAllFilesBtn').onclick = () => verifyAllFiles().catch((e) => notify(errText(e), 'error'));
+    $('refreshFilesBtn').onclick = () => refreshFiles().catch((e) => notify(errText(e), 'error'));
     $('verifyFilesBtn').onclick = () => verifyFiles().catch(() => {});
     $('gcBtn').onclick = () => gcOrphans().catch(() => {});
-    $('srcLoadBtn').onclick = () => loadSrcAlbumFiles().catch((e) => { $('srcStatus').textContent = String(e); });
+    $('srcDetails').addEventListener('toggle', () => { if ($('srcDetails').open) fillSrcAlbumSelect(); });
+    $('srcLoadBtn').onclick = () => loadSrcAlbumFiles().catch((e) => { $('srcStatus').textContent = errText(e); });
     $('srcSelectAllBtn').onclick = () => srcSelectAll();
-    $('srcAddBtn').onclick = () => addSelectedFromSrc().catch((e) => { $('srcStatus').textContent = String(e); });
-    $('uploadBtn').onclick = () => uploadSelected().catch(() => {});
+    $('srcAddBtn').onclick = () => addSelectedFromSrc().catch((e) => { $('srcStatus').textContent = errText(e); });
+    $('uploadBtn').onclick = () => uploadSelected().catch((e) => { $('uploadBtn').disabled = false; notify(errText(e), 'error'); });
+    $('saveAlbumBtn').onclick = () => saveAlbumSettings().catch((e) => notify(errText(e), 'error'));
+    $('deleteAlbumBtn').onclick = () => deleteCurrentAlbum().catch((e) => notify(errText(e), 'error'));
 
     $('createBtn').onclick = async () => {
       const albumId = $('newAlbumId').value.trim();
       const title = $('newTitle').value.trim() || 'OhMyPhoto';
       const secretEl = $('newSecret');
       const secretRaw = secretEl.value.trim();
-      if (!albumId) return alert('albumId required');
+      if (!albumId) return notify('Album ID is required', 'error');
       if (secretRaw && !isValidSecret(secretRaw)) {
-        return alert('Invalid secret. Allowed: a-z A-Z 0-9 _ - (max 256 chars).');
+        return notify('Invalid secret. Allowed: a-z A-Z 0-9 _ - (max 256 chars).', 'error');
       }
       if (secretRaw && isWeakSecret(secretRaw)) {
-        return alert(`Secret too short: at least ${MIN_SECRET_LENGTH} characters (it is also the key that signs every photo URL). Leave the field empty to generate one.`);
+        return notify(`Secret too short: at least ${MIN_SECRET_LENGTH} characters (it is also the key that signs every photo URL). Leave the field empty to generate one.`, 'error');
       }
       const secret = secretRaw || generateSecret();
-      const r = await api('/api/admin/album', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ albumId, title, secret })
-      });
-      if (!r.ok) {
-        const t = await r.text();
-        alert(`Create failed: ${r.status} ${t}`);
-        return;
+      const btn = $('createBtn');
+      btn.disabled = true;
+      try {
+        const r = await api('/api/admin/album', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ albumId, title, secret })
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          notify(r.status === 409 ? `Album "${albumId}" already exists` : `Create failed: ${r.status} ${t}`, 'error');
+          return;
+        }
+      } finally {
+        btn.disabled = false;
       }
       $('newAlbumId').value = '';
+      $('newTitle').value = '';
       $('newSecret').value = '';
-      await refresh();
+      $('newAlbumDesc').value = '';
+      genAlbumIdStatusEl.textContent = '';
+      notify(`Album "${albumId}" created`, 'ok');
+      lastAlbums = []; // force reload on the album page
+      location.hash = albumHash(albumId);
     };
+    for (const id of ['newAlbumId', 'newTitle', 'newSecret']) {
+      $(id).onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('createBtn').click(); } };
+    }
+    $('newAlbumDesc').onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('genAlbumIdBtn').click(); } };
 
     $('genSecretBtn').onclick = () => {
       const secretEl = $('newSecret');
@@ -1429,11 +1866,12 @@
       const titleEl = $('newTitle');
       const desc = String(descEl && descEl.value || '').trim();
       if (!desc) {
-        alert('Enter a short description first (e.g. "семья на пляже")');
+        notify('Enter a short description first (e.g. "семья на пляже")', 'error');
+        try { descEl.focus(); } catch {}
         return;
       }
       if (btn) btn.disabled = true;
-      if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = 'Generating...';
+      genAlbumIdStatusEl.textContent = 'Generating...';
       try {
         const r = await api('/api/admin/generate-album-id', {
           method: 'POST',
@@ -1442,16 +1880,16 @@
         });
         if (!r.ok) {
           const t = await r.text().catch(() => '');
-          if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = `Error: ${r.status}`;
-          alert(`AI generation failed: ${r.status} ${t}`);
+          genAlbumIdStatusEl.textContent = `Error: ${r.status}`;
+          notify(`AI generation failed: ${r.status} ${t}`, 'error');
           return;
         }
         const data = await r.json().catch(() => null);
         const id = data && data.albumId ? String(data.albumId) : '';
         const title = data && data.title ? String(data.title) : '';
         if (!id) {
-          if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = 'Error: empty result';
-          alert('AI returned empty result');
+          genAlbumIdStatusEl.textContent = 'Error: empty result';
+          notify('AI returned an empty result', 'error');
           return;
         }
         if (albumIdEl) {
@@ -1461,17 +1899,13 @@
         if (titleEl && title && !String(titleEl.value || '').trim()) {
           titleEl.value = title;
         }
-        if (genAlbumIdStatusEl) genAlbumIdStatusEl.textContent = `OK: ${id}`;
+        genAlbumIdStatusEl.textContent = `Suggested: ${id}${title ? ` — ${title}` : ''}. Edit if needed.`;
       } finally {
         if (btn) btn.disabled = false;
       }
     };
 
-    refresh().catch(err => {
-      statusEl.textContent = String(err);
-    });
+    route();
   </script>
 </body>
 </html>
-
-

@@ -72,7 +72,7 @@ Per-IP limits use Cloudflare's native Rate Limiting bindings (`[[ratelimits]]` i
 
 ## Admin (create/update/rename/delete albums)
 
-Open `./admin.html` (for example: `http://127.0.0.1:8787/admin.html` when running locally).
+Open `/admin` (for example: `http://127.0.0.1:8787/admin.html` when running locally). The UI shows a login form until a session exists, then a list of albums; each album has its own page (`#/album/<id>`) with share links, photos, settings and delete, so browser back/forward work.
 
 Login exchanges `ADMIN_TOKEN` (a Worker secret in production) for a signed 7-day session token; all other admin calls send `Authorization: Bearer <sessionToken>`.
 
