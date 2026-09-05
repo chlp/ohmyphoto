@@ -21,9 +21,28 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
 
 ## Download all as ZIP
 
-- Visitors can download every original of an album as one `.zip`. The archive is assembled **in the browser** from the signed image URLs (no compression, JPEGs don't shrink); the Worker never touches it, so this works on the Workers Free plan.
-- The feature is offered only for albums with at most **100 photos** and at most **500 MB** of originals (`ZIP_MAX_FILES`, `ZIP_MAX_BYTES`; `ZIP_DOWNLOAD=0` turns it off). Larger albums still show the button, and clicking it explains exactly which limit was exceeded.
-- Chromium browsers stream the archive straight to disk (save dialog); other browsers build it in memory and then trigger a normal download.
+Visitors can download every original of an album as a single `.zip` from a button above the photo grid.
+
+**Why the browser builds the archive.** Cloudflare Workers Free gives a request 10 ms of CPU and 50 subrequests. A ZIP needs a CRC-32 over every byte and one R2 read per photo, so even a modest album blows through both limits. Instead the gallery page fetches the signed original URLs it already has (`/img/<albumId>/photos/<ref>?s=...`) and writes the archive itself. The Worker's only role is to say whether the download is allowed; R2 egress is free, so the download costs nothing extra.
+
+**How it works**
+
+- Format: plain ZIP, method STORE (JPEGs don't compress), UTF-8 names, data descriptors so files stream without knowing sizes up front. No ZIP64, which is fine under the 4 GiB / 65535-entry ceiling enforced by the limits below. Verified with `unzip` and macOS Archive Utility.
+- Saving: Chromium browsers (Chrome, Edge, Brave) open a save dialog and stream the archive straight to disk, so memory stays flat. Firefox and Safari build the archive in memory and then trigger a normal download; the 500 MB cap keeps that workable on desktop, on phones very large albums may still fail.
+- Progress and cancel are shown next to the button. Photos are fetched one by one; a `429` from the image rate limit is retried after `Retry-After`.
+- The client stops with an error if the streamed bytes exceed the configured maximum, even when the server-side estimate said it would fit.
+
+**Limits (server-side, per album)**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ZIP_MAX_FILES` | `100` | Maximum number of photos. Also keeps one download under the 300/min `/img` rate limit |
+| `ZIP_MAX_BYTES` | `524288000` (500 MiB) | Maximum total size of originals |
+| `ZIP_DOWNLOAD` | `1` | Set to `0` to hide the feature entirely |
+
+The album API response carries the verdict in `zip: { available, reason, fileCount, totalBytes, sizeKnown, maxFiles, maxBytes }`. For albums over a limit the button stays visible but disabled, with a short hint next to it; clicking it prints the exact reason, e.g. *"it has 132 photos, and the archive download is limited to 100 photos"*. Photographers who need to hand over a bigger shoot can create a favourites album from the same photos (nothing is copied) or split the shoot into several albums.
+
+**Photo sizes.** The size check relies on a `size` field per entry in `info.json`, recorded automatically on upload and when attaching existing photos. Albums created before this feature have no sizes, and the gallery reports the download as unavailable ("photo sizes have not been recorded"). Run **Verify files (all)** once in the admin UI after deploying; it backfills the sizes from R2.
 
 ## Bot protection (Cloudflare Turnstile captcha)
 
