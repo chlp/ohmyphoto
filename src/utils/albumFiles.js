@@ -71,6 +71,11 @@ export function parseFileEntries(info) {
   return out;
 }
 
+/** Natural order: `2.jpg` before `10.jpg`, so numeric prefixes need no zero padding. */
+export function compareNames(a, b) {
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) || String(a).localeCompare(String(b));
+}
+
 export function sortFileEntries(entries) {
-  return [...entries].sort((a, b) => a.name.localeCompare(b.name));
+  return [...entries].sort((a, b) => compareNames(a.name, b.name));
 }

@@ -1,7 +1,7 @@
 import { imageSig, timingSafeEqual } from '../utils/crypto.js';
 import { getAlbumInfoWithSecrets } from '../utils/album.js';
 import { forbidden, notFound } from '../utils/response.js';
-import { isValidAlbumId } from '../utils/validate.js';
+import { isValidAlbumId, isValidPhotoFileName } from '../utils/validate.js';
 import { imageObjectKey } from '../utils/albumFiles.js';
 
 // Objects are content-addressed and never change, so browsers may cache them for a year.
@@ -88,6 +88,12 @@ export async function handleImageRequest(request, env, albumId, kind, ref, ctx) 
   headers.set("X-Robots-Tag", "noindex, nofollow");
   headers.set("Cache-Control", `public, max-age=${BROWSER_MAX_AGE_S}, immutable, s-maxage=${edgeMaxAge}`);
   headers.set("X-OhMyPhoto-Cache", "MISS");
+  // Optional display name (`n`, validated, ASCII by construction): "save image" and the lightbox
+  // download link then produce <name> instead of <ref>.jpg. Not signed; it cannot change what is served.
+  const displayName = url.searchParams.get('n') || '';
+  if (displayName && isValidPhotoFileName(displayName)) {
+    headers.set("Content-Disposition", `inline; filename="${displayName}"`);
+  }
 
   const response = new Response(obj.body, { headers });
 

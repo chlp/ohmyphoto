@@ -47,6 +47,34 @@ function uploadForm(name, photoBytes = JPEG, previewBytes = JPEG, { overwrite = 
   return { method: "POST", body: fd };
 }
 
+// New secrets must be at least 16 chars (MIN_ALBUM_SECRET_LENGTH); these are test fixtures, not real ones.
+const SA = "secret-a-0123456789";
+const SB = "secret-b-0123456789";
+const SC = "secret-c-0123456789";
+const SK = "secret-k-0123456789";
+const SD = "secret-d-0123456789";
+const S_NEW = "rotated-secret-0123456789";
+
+/** Drive the paginated verify-files endpoint until `done`. */
+async function verifyAll(api, albumId) {
+  let cursor = null;
+  const acc = { fileCount: 0, invalid: 0, removed: [], missingPreviewCount: 0, sizeUpdated: 0, pages: 0, first: null };
+  do {
+    const resp = await api(`/album/${albumId}/verify-files`, jsonInit("POST", cursor ? { cursor } : {}));
+    expect(resp.status).toBe(200);
+    const r = await resp.json();
+    if (!acc.first) acc.first = r;
+    acc.fileCount = r.fileCount;
+    acc.invalid += r.invalid;
+    acc.removed.push(...r.removed);
+    acc.missingPreviewCount += r.missingPreviewCount;
+    acc.sizeUpdated += r.sizeUpdated;
+    acc.pages += 1;
+    cursor = r.done ? null : r.cursor;
+  } while (cursor);
+  return acc;
+}
+
 async function gallery(albumId, secret) {
   return SELF.fetch(`https://x/api/album/${albumId}`, jsonInit("POST", { secret }));
 }
@@ -86,13 +114,16 @@ describe("album lifecycle", () => {
     const created = await api("/album", jsonInit("POST", { albumId, title: "Lake" }));
     expect(created.status).toBe(200);
     const { secret } = await created.json();
-    expect(secret).toMatch(/^[0-9a-f]{6}$/);
+    expect(secret).toMatch(/^[0-9a-f]{20}$/);
 
     expect((await api("/album", jsonInit("POST", { albumId }))).status).toBe(409);
     expect((await api("/album", jsonInit("POST", { albumId: "bad/id" }))).status).toBe(400);
+    // new secrets must be long enough (the secret is also the HMAC key of every image URL)
+    expect((await api("/album", jsonInit("POST", { albumId: "short-secret", secret: "abc123" }))).status).toBe(400);
+    expect((await api("/album", jsonInit("POST", { albumId: "bad-secret", secret: "has space 0123456789" }))).status).toBe(400);
 
     const list = await (await api("/albums")).json();
-    expect(list.albums).toEqual([{ albumId, title: "Lake", secretCount: 1, secrets: [secret], fileCount: 0 }]);
+    expect(list).toEqual({ albums: [{ albumId, title: "Lake", secretCount: 1, secrets: [secret], fileCount: 0 }], cursor: null, done: true });
 
     // upload: ref is sha256 of the photo bytes when the client does not provide one
     const up1 = await api(`/album/${albumId}/file`, uploadForm("b.jpg", JPEG2));
@@ -136,8 +167,14 @@ describe("album lifecycle", () => {
     });
 
     const sig = await imageSig(albumId, refA, secret);
-    expect(g.files[0].photoUrl).toBe(`/img/${albumId}/photos/${refA}?s=${sig}`);
+    expect(g.files[0].photoUrl).toBe(`/img/${albumId}/photos/${refA}?s=${sig}&n=a.jpg`);
     expect(g.files[0].previewUrl).toBe(`/img/${albumId}/preview/${refA}?s=${sig}`);
+
+    // the display name only affects Content-Disposition; it is not signed and cannot change the object
+    const orig = await SELF.fetch(`https://x${g.files[0].photoUrl}`);
+    expect(orig.status).toBe(200);
+    expect(orig.headers.get("Content-Disposition")).toBe('inline; filename="a.jpg"');
+    expect((await SELF.fetch(`https://x/img/${albumId}/photos/${refA}?s=${sig}&n=..%2Fevil.jpg`)).headers.get("Content-Disposition")).toBeNull();
 
     const img = await SELF.fetch(`https://x${g.files[0].previewUrl}`);
     expect(img.status).toBe(200);
@@ -156,16 +193,17 @@ describe("album lifecycle", () => {
     expect((await SELF.fetch(`https://x/img/${albumId}/photos/${await sha256(JPEG2)}?s=${sig}`)).status).toBe(403);
     expect((await SELF.fetch(`https://x/img/${albumId}/photos/not-a-ref?s=${sig}`)).status).toBe(403);
 
-    // rotate secrets: old sig stops working, cache is invalidated
-    const upd = await api(`/album/${albumId}`, jsonInit("PUT", { title: "Lake 2", secrets: ["newsecret"] }));
+    // rotate secrets: old sig stops working, cache is invalidated; a new short secret is refused
+    expect((await api(`/album/${albumId}`, jsonInit("PUT", { secrets: ["short"] }))).status).toBe(400);
+    const upd = await api(`/album/${albumId}`, jsonInit("PUT", { title: "Lake 2", secrets: [S_NEW] }));
     expect(upd.status).toBe(200);
     // g.files[0].previewUrl is intentionally still served from the edge cache (documented trade-off);
     // an uncached URL signed with the old secret must be rejected.
     expect((await SELF.fetch(`https://x${g.files[1].previewUrl}`)).status).toBe(403);
-    const g2 = await (await gallery(albumId, "newsecret")).json();
+    const g2 = await (await gallery(albumId, S_NEW)).json();
     expect(g2.title).toBe("Lake 2");
     const info = await (await env.BUCKET.get(`albums/${albumId}/info.json`)).json();
-    expect(info.secrets).toEqual({ newsecret: {} });
+    expect(info.secrets).toEqual({ [S_NEW]: {} });
     expect(info.files).toEqual([{ name: "a.jpg", ref: refA, size: JPEG.length }, { name: "b.jpg", ref: await sha256(JPEG2), size: JPEG2.length }]);
 
     // rename / delete photo are metadata-only: shared objects untouched
@@ -177,23 +215,45 @@ describe("album lifecycle", () => {
     expect(after.files.map((f) => [f.name, f.ref, f.size])).toEqual([["z.jpg", refA, JPEG.length]]);
     expect(await env.BUCKET.head(`photos/${refA}.jpg`)).not.toBeNull();
     expect(await env.BUCKET.head(`photos/${await sha256(JPEG2)}.jpg`)).not.toBeNull();
-    const gz = await (await gallery(albumId, "newsecret")).json();
+    const gz = await (await gallery(albumId, S_NEW)).json();
     expect(gz.files[0].photoUrl).toContain(`/photos/${refA}?s=`);
 
-    // delete album: only albums/<id>/ goes away, shared photos stay for GC
-    expect((await api(`/album/${albumId}`, { method: "DELETE" })).status).toBe(200);
+    // delete album: info.json moves to trash/, shared photos stay for GC
+    const del = await api(`/album/${albumId}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    const { trashKey } = await del.json();
+    expect(trashKey).toMatch(new RegExp(`^trash/albums/${albumId}/\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}Z\\.json$`));
     expect((await api(`/album/${albumId}`, { method: "DELETE" })).status).toBe(404);
     expect((await env.BUCKET.list({ prefix: `albums/${albumId}/` })).objects).toHaveLength(0);
     expect(await env.BUCKET.head(`photos/${refA}.jpg`)).not.toBeNull();
-    expect((await gallery(albumId, "newsecret")).status).toBe(404);
+    expect((await gallery(albumId, S_NEW)).status).toBe(404);
+
+    // trash: listed, restorable, 409 if the album exists again, entries can be dropped
+    const trash = await (await api("/trash")).json();
+    expect(trash.items.find((t) => t.key === trashKey)).toMatchObject({ albumId, deletedAt: expect.stringMatching(/Z$/) });
+    expect((await api("/trash/restore", jsonInit("POST", { key: "trash/albums/x/nope.json" }))).status).toBe(400);
+    expect((await api("/trash/restore", jsonInit("POST", { key: trashKey, albumId: "bad/id" }))).status).toBe(400);
+    const restored = await api("/trash/restore", jsonInit("POST", { key: trashKey }));
+    expect(restored.status).toBe(200);
+    expect(await restored.json()).toEqual({ restored: true, albumId, key: trashKey });
+    expect(await env.BUCKET.head(trashKey)).toBeNull();
+    const gr = await (await gallery(albumId, S_NEW)).json();
+    expect(gr.files.map((f) => f.name)).toEqual(["z.jpg"]);
+    const del2 = await (await api(`/album/${albumId}`, { method: "DELETE" })).json();
+    await api("/album", jsonInit("POST", { albumId, secret: SA }));
+    expect((await api("/trash/restore", jsonInit("POST", { key: del2.trashKey }))).status).toBe(409);
+    expect((await api(`/trash/${encodeURIComponent(del2.trashKey)}`, { method: "DELETE" })).status).toBe(200);
+    expect((await api(`/trash/${encodeURIComponent(del2.trashKey)}`, { method: "DELETE" })).status).toBe(404);
+    expect(await env.BUCKET.head(del2.trashKey)).toBeNull();
+    await api(`/album/${albumId}`, { method: "DELETE" });
   });
 
   it("de-duplicates uploads and attaches existing photos to another album", async () => {
     const a = "2025.06.05-full-shoot-all";
     const b = "2025.06.05-client-favourites";
     const ref = await sha256(JPEG);
-    await api("/album", jsonInit("POST", { albumId: a, secret: "sa" }));
-    await api("/album", jsonInit("POST", { albumId: b, secret: "sb" }));
+    await api("/album", jsonInit("POST", { albumId: a, secret: SA }));
+    await api("/album", jsonInit("POST", { albumId: b, secret: SB }));
 
     expect(await (await api(`/photo/${ref}`)).json()).toEqual({ ref, exists: false, hasPreview: false });
     expect((await api(`/photo/nope`)).status).toBe(400);
@@ -213,13 +273,16 @@ describe("album lifecycle", () => {
     expect((await api(`/album/${b}/files`, jsonInit("POST", { files: [{ name: "fav-1.jpg", ref: await sha256(JPEG2) }] }))).status).toBe(400);
     expect((await api(`/album/${b}/files`, jsonInit("POST", { files: [{ name: "bad", ref: "x" }] }))).status).toBe(400);
     expect((await api(`/album/${b}/files`, jsonInit("POST", { files: [] }))).status).toBe(200);
+    // attach is paginated to stay within the subrequest budget; the admin UI sends chunks
+    const tooMany = Array.from({ length: 21 }, (_, i) => ({ name: `m${i}.jpg`, ref }));
+    expect((await api(`/album/${b}/files`, jsonInit("POST", { files: tooMany }))).status).toBe(400);
 
-    const gb = await (await gallery(b, "sb")).json();
+    const gb = await (await gallery(b, SB)).json();
     expect(gb.files.map((f) => [f.name, f.size])).toEqual([["fav-1.jpg", JPEG.length]]);
-    expect(gb.files[0].photoUrl).toBe(`/img/${b}/photos/${ref}?s=${await imageSig(b, ref, "sb")}`);
+    expect(gb.files[0].photoUrl).toBe(`/img/${b}/photos/${ref}?s=${await imageSig(b, ref, SB)}&n=fav-1.jpg`);
     expect((await SELF.fetch(`https://x${gb.files[0].photoUrl}`)).status).toBe(200);
     // a signature from album a does not open the same object through album b
-    expect((await SELF.fetch(`https://x/img/${b}/photos/${ref}?s=${await imageSig(a, ref, "sa")}`)).status).toBe(403);
+    expect((await SELF.fetch(`https://x/img/${b}/photos/${ref}?s=${await imageSig(a, ref, SA)}`)).status).toBe(403);
 
     // name conflict with a different ref -> 409 unless overwrite
     await api(`/album/${b}/file`, uploadForm("fav-2.jpg", JPEG2));
@@ -233,31 +296,31 @@ describe("album lifecycle", () => {
   it("renames an album by moving info.json only", async () => {
     const oldId = "2025.06.03-old-name-here";
     const newId = "2025.06.03-new-name-here";
-    await api("/album", jsonInit("POST", { albumId: oldId, secret: "abc", title: "Old" }));
+    await api("/album", jsonInit("POST", { albumId: oldId, secret: SC, title: "Old" }));
     await api(`/album/${oldId}/file`, uploadForm("1.jpg"));
     const ref = await sha256(JPEG);
 
-    const r = await api(`/album/${oldId}`, jsonInit("PUT", { title: "New", secrets: ["abc"], newAlbumId: newId }));
+    const r = await api(`/album/${oldId}`, jsonInit("PUT", { title: "New", secrets: [SC], newAlbumId: newId }));
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ albumId: newId, title: "New", renamedFrom: oldId });
     expect(await env.BUCKET.head(`albums/${oldId}/info.json`)).toBeNull();
     expect((await env.BUCKET.list({ prefix: `albums/${newId}/` })).objects.map((o) => o.key)).toEqual([`albums/${newId}/info.json`]);
-    expect((await gallery(oldId, "abc")).status).toBe(404);
+    expect((await gallery(oldId, SC)).status).toBe(404);
 
-    const g = await (await gallery(newId, "abc")).json();
+    const g = await (await gallery(newId, SC)).json();
     expect(g.title).toBe("New");
-    expect(g.files[0].photoUrl).toBe(`/img/${newId}/photos/${ref}?s=${await imageSig(newId, ref, "abc")}`);
+    expect(g.files[0].photoUrl).toBe(`/img/${newId}/photos/${ref}?s=${await imageSig(newId, ref, SC)}&n=1.jpg`);
     expect((await SELF.fetch(`https://x${g.files[0].photoUrl}`)).status).toBe(200);
 
     // destination taken
-    await api("/album", jsonInit("POST", { albumId: oldId, secret: "abc" }));
+    await api("/album", jsonInit("POST", { albumId: oldId, secret: SC }));
     expect((await api(`/album/${oldId}`, jsonInit("PUT", { newAlbumId: newId }))).status).toBe(409);
     expect((await api(`/album/nope`, jsonInit("PUT", { title: "x" }))).status).toBe(404);
   });
 
   it("verify-files drops entries whose object is gone and counts missing previews", async () => {
     const albumId = "2025.06.02-quiet-forest-walk";
-    await api("/album", jsonInit("POST", { albumId, secret: "abc" }));
+    await api("/album", jsonInit("POST", { albumId, secret: SC }));
     await api(`/album/${albumId}/file`, uploadForm("kept.jpg"));
     const gone = await sha256(JPEG2);
     await api(`/album/${albumId}/file`, uploadForm("gone.jpg", JPEG2));
@@ -270,20 +333,45 @@ describe("album lifecycle", () => {
     await env.BUCKET.put(infoKey, JSON.stringify(before));
 
     const r = await (await api(`/album/${albumId}/verify-files`, { method: "POST" })).json();
-    expect(r).toEqual({ ok: true, albumId, fileCount: 1, invalid: 0, removed: ["gone.jpg"], missingPreviewCount: 1, sizeUpdated: 1 });
+    expect(r).toEqual({ ok: true, albumId, fileCount: 1, checked: 2, invalid: 0, removed: ["gone.jpg"], missingPreviewCount: 1, sizeUpdated: 1, cursor: null, done: true });
     const info = await (await env.BUCKET.get(infoKey)).json();
     expect(info.files).toEqual([{ name: "kept.jpg", ref: await sha256(JPEG), size: JPEG.length }]);
     expect((await api(`/album/nope/verify-files`, { method: "POST" })).status).toBe(404);
+    expect(await verifyAll(api, albumId)).toMatchObject({ fileCount: 1, removed: [], pages: 1 });
+  });
 
-    const all = await (await api("/albums/verify-files", { method: "POST" })).json();
-    expect(all.ok).toBe(true);
-    expect(all.albumsErr).toBe(0);
-    expect(all.results.find((x) => x.albumId === albumId)).toMatchObject({ ok: true, fileCount: 1, removed: [] });
+  it("verify-files walks large albums page by page (subrequest budget)", async () => {
+    const albumId = "2025.06.02-big-album-pages";
+    await api("/album", jsonInit("POST", { albumId, secret: SC }));
+    const infoKey = `albums/${albumId}/info.json`;
+    await api(`/album/${albumId}/file`, uploadForm("p0.jpg"));
+    const info = await (await env.BUCKET.get(infoKey)).json();
+    // 45 entries: 44 point at one real object (sizes stripped), one at a missing object
+    const ref = await sha256(JPEG);
+    const gone = await sha256(JPEG2);
+    info.files = [
+      ...Array.from({ length: 44 }, (_, i) => ({ name: `p${i}.jpg`, ref })),
+      { name: "missing.jpg", ref: gone }
+    ];
+    await env.BUCKET.put(infoKey, JSON.stringify(info));
+    await api(`/album/${albumId}`, jsonInit("PUT", { title: "bust cache" }));
+
+    const acc = await verifyAll(api, albumId);
+    // "missing.jpg" sorts into page 1, so the first page already drops it
+    expect(acc.first).toMatchObject({ done: false, checked: 20, fileCount: 44, removed: ["missing.jpg"] });
+    expect(typeof acc.first.cursor).toBe("string");
+    expect(acc).toMatchObject({ fileCount: 44, removed: ["missing.jpg"], invalid: 0, pages: 3 });
+    expect(acc.sizeUpdated).toBe(44);
+    const after = await (await env.BUCKET.get(infoKey)).json();
+    expect(after.files).toHaveLength(44);
+    expect(after.files.every((f) => f.size === JPEG.length)).toBe(true);
+    // natural order: p2 before p10
+    expect(after.files.map((f) => f.name).slice(0, 12)).toEqual(["p0.jpg", "p1.jpg", "p2.jpg", "p3.jpg", "p4.jpg", "p5.jpg", "p6.jpg", "p7.jpg", "p8.jpg", "p9.jpg", "p10.jpg", "p11.jpg"]);
   });
 
   it("verify-files drops legacy/invalid entries and the album list counts only valid ones", async () => {
     const albumId = "2025.06.04-legacy-string-files";
-    await api("/album", jsonInit("POST", { albumId, secret: "abc" }));
+    await api("/album", jsonInit("POST", { albumId, secret: SC }));
     await api(`/album/${albumId}/file`, uploadForm("real.jpg"));
     const infoKey = `albums/${albumId}/info.json`;
     const info = await (await env.BUCKET.get(infoKey)).json();
@@ -301,14 +389,12 @@ describe("album lifecycle", () => {
     expect(after.files).toEqual([{ name: "real.jpg", ref: await sha256(JPEG), size: JPEG.length }]);
 
     const again = await (await api(`/album/${albumId}/verify-files`, { method: "POST" })).json();
-    expect(again).toMatchObject({ invalid: 0, removed: [], sizeUpdated: 0 });
-    const all = await (await api("/albums/verify-files", { method: "POST" })).json();
-    expect(all.totalInvalid).toBe(0);
+    expect(again).toMatchObject({ invalid: 0, removed: [], sizeUpdated: 0, done: true });
   });
 
   it("gallery reports the ZIP download as unavailable while sizes are unknown", async () => {
     const albumId = "2025.06.03-legacy-no-sizes";
-    await api("/album", jsonInit("POST", { albumId, secret: "abc" }));
+    await api("/album", jsonInit("POST", { albumId, secret: SC }));
     await api(`/album/${albumId}/file`, uploadForm("x.jpg"));
     const infoKey = `albums/${albumId}/info.json`;
     const info = await (await env.BUCKET.get(infoKey)).json();
@@ -316,20 +402,20 @@ describe("album lifecycle", () => {
     await env.BUCKET.put(infoKey, JSON.stringify(info));
     await api(`/album/${albumId}`, jsonInit("PUT", { title: "bust cache" }));
 
-    const g = await (await gallery(albumId, "abc")).json();
+    const g = await (await gallery(albumId, SC)).json();
     expect(g.files[0].size).toBeUndefined();
     expect(g.zip).toMatchObject({ available: false, reason: "size_unknown", fileCount: 1, sizeKnown: false });
 
     await api(`/album/${albumId}/verify-files`, { method: "POST" });
-    const g2 = await (await gallery(albumId, "abc")).json();
+    const g2 = await (await gallery(albumId, SC)).json();
     expect(g2.zip).toMatchObject({ available: true, reason: null, totalBytes: JPEG.length });
   });
 
   it("gc deletes shared objects no album references (dry run first)", async () => {
     const keep = "2025.06.07-keep-me";
     const drop = "2025.06.07-drop-me";
-    await api("/album", jsonInit("POST", { albumId: keep, secret: "k" }));
-    await api("/album", jsonInit("POST", { albumId: drop, secret: "d" }));
+    await api("/album", jsonInit("POST", { albumId: keep, secret: SK }));
+    await api("/album", jsonInit("POST", { albumId: drop, secret: SD }));
     await api(`/album/${keep}/file`, uploadForm("k.jpg", JPEG));
     await api(`/album/${drop}/file`, uploadForm("d.jpg", JPEG2));
     await env.BUCKET.put("photos/junk.txt", "x");
@@ -337,17 +423,28 @@ describe("album lifecycle", () => {
     const orphan = await sha256(JPEG2);
     expect((await api(`/album/${drop}`, { method: "DELETE" })).status).toBe(200);
 
-    // walk both prefixes; default is dry run (other tests leave orphans too, so check keys, not counts)
+    // a run starts by collecting referenced refs from the albums (paged), then scans both prefixes;
+    // default is dry run (other tests leave orphans too, so check keys, not counts)
     let r = await (await api("/photos/gc", jsonInit("POST", {}))).json();
-    expect(r).toMatchObject({ dryRun: true, done: false, prefix: "photos/", deleted: 0 });
+    expect(r).toMatchObject({ dryRun: true, phase: "refs", done: false, scanned: 0, deleted: 0 });
+    expect(r.albumCount).toBeGreaterThanOrEqual(1);
+    expect(r.referencedRefs).toBeGreaterThanOrEqual(1);
+    expect(await env.BUCKET.head(`gc/${r.runId}.json`)).not.toBeNull();
+    while (r.phase === "refs") r = await (await api("/photos/gc", jsonInit("POST", { cursor: r.cursor }))).json();
+    expect(r).toMatchObject({ dryRun: true, phase: "scan", done: false, prefix: "photos/", deleted: 0 });
     expect(r.orphanCount).toBeGreaterThanOrEqual(2);
     expect(r.orphans).toEqual(expect.arrayContaining([`photos/${orphan}.jpg`, "photos/junk.txt"]));
     expect(r.orphans).not.toContain(`photos/${kept}.jpg`);
+    const runId = r.runId;
     r = await (await api("/photos/gc", jsonInit("POST", { cursor: r.cursor }))).json();
     expect(r).toMatchObject({ dryRun: true, done: true, prefix: "previews/" });
     expect(r.orphans).toContain(`previews/${orphan}.jpg`);
     expect(r.orphans).not.toContain(`previews/${kept}.jpg`);
     expect(await env.BUCKET.head(`photos/${orphan}.jpg`)).not.toBeNull();
+    // the run's snapshot is gone once it finished; stale or garbage cursors are rejected
+    expect(await env.BUCKET.head(`gc/${runId}.json`)).toBeNull();
+    expect((await api("/photos/gc", jsonInit("POST", { cursor: `scan|${runId}|photos/|` }))).status).toBe(400);
+    expect((await api("/photos/gc", jsonInit("POST", { cursor: "garbage" }))).status).toBe(400);
 
     let cursor;
     do {
@@ -355,12 +452,13 @@ describe("album lifecycle", () => {
       expect(r.deleted).toBe(r.orphanCount);
       cursor = r.cursor;
     } while (!r.done);
+    expect(await env.BUCKET.head(`gc/${r.runId}.json`)).toBeNull();
     expect(await env.BUCKET.head(`photos/${orphan}.jpg`)).toBeNull();
     expect(await env.BUCKET.head(`previews/${orphan}.jpg`)).toBeNull();
     expect(await env.BUCKET.head("photos/junk.txt")).toBeNull();
     expect(await env.BUCKET.head(`photos/${kept}.jpg`)).not.toBeNull();
     expect(await env.BUCKET.head(`previews/${kept}.jpg`)).not.toBeNull();
-    expect((await SELF.fetch(`https://x${(await (await gallery(keep, "k")).json()).files[0].photoUrl}`)).status).toBe(200);
+    expect((await SELF.fetch(`https://x${(await (await gallery(keep, SK)).json()).files[0].photoUrl}`)).status).toBe(200);
   });
 });
 

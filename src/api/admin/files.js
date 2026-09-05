@@ -1,17 +1,17 @@
 import { jsonNoStore, badRequest, conflict, notFound } from '../../utils/response.js';
 import { isValidAlbumId, isValidPhotoFileName, normalizeJpgName } from '../../utils/validate.js';
-import { imageObjectKey, isValidPhotoRef, photoObjectKey, previewObjectKey } from '../../utils/albumFiles.js';
+import { compareNames, imageObjectKey, isValidPhotoRef, photoObjectKey, previewObjectKey } from '../../utils/albumFiles.js';
 import { bytesToHex } from '../../utils/crypto.js';
 import { readJson } from '../../utils/http.js';
 import {
-  albumExists,
+  PAGE_ATTACH_FILES,
+  PAGE_VERIFY_FILES,
   getFileEntries,
   getInfoJson,
-  listAlbumIds,
   mapLimit,
-  putInfoJson,
   removeInfoFile,
   renameInfoFile,
+  updateInfoJson,
   upsertInfoFile,
   withFileEntries
 } from './infoStore.js';
@@ -43,67 +43,76 @@ async function refObjectsExist(env, ref) {
 }
 
 /**
- * Verify `files` of one album against storage: entries that are not `{ name, ref }` (or are
- * duplicates by name) are dropped and counted in `invalid`, entries whose photos/<ref>.jpg is
- * missing are dropped and listed in `removed`, missing previews are counted, and each kept
- * entry's `size` is (re)recorded from the object. One head() pair per entry, no listing.
+ * Verify one page of an album's `files` against storage.
+ *
+ * Entries that are not `{ name, ref }` (or duplicates by name) are dropped and counted in
+ * `invalid` (this happens on every page but is only non-zero on the first, since the first
+ * page's write removes them). Then the first PAGE_VERIFY_FILES entries with name > `after`
+ * are checked with one head() pair each: entries whose photo is missing are dropped and listed
+ * in `removed`, missing previews are counted, and `size` is (re)recorded. The write is
+ * conditional on the ETag (see updateInfoJson). `cursor` is the last checked name, or null
+ * when the album is done; `fileCount` is the number of valid entries after this page.
  */
-export async function verifyAlbumFiles(env, albumId) {
-  const info = await getInfoJson(env, albumId);
-  if (!info) return { ok: false, status: 404 };
+export async function verifyAlbumFiles(env, albumId, { after = null, limit = PAGE_VERIFY_FILES } = {}) {
+  const r = await updateInfoJson(env, albumId, async (info) => {
+    const rawCount = Array.isArray(info.files) ? info.files.length : 0;
+    const all = getFileEntries(info);
+    const invalid = rawCount - all.length;
 
-  const rawCount = Array.isArray(info.files) ? info.files.length : 0;
-  const prev = getFileEntries(info);
-  const invalid = rawCount - prev.length;
-  const status = await mapLimit(prev, 16, (e) => refObjectsExist(env, e.ref));
-  const kept = prev.filter((_, i) => status[i].photo);
-  const removed = prev.filter((_, i) => !status[i].photo).map((e) => e.name);
-  const missingPreviewCount = status.filter((s) => s.photo && !s.preview).length;
+    const start = after ? all.findIndex((e) => compareNames(e.name, after) > 0) : 0;
+    const page = start < 0 ? [] : all.slice(start, start + limit);
+    const status = await mapLimit(page, 16, (e) => refObjectsExist(env, e.ref));
 
-  let sizeUpdated = 0;
-  const next = prev.flatMap((e, i) => {
-    if (!status[i].photo) return [];
-    if (e.size === status[i].size) return [e];
-    sizeUpdated += 1;
-    return [{ ...e, size: status[i].size }];
-  });
+    const removed = [];
+    let missingPreviewCount = 0;
+    let sizeUpdated = 0;
+    const checked = new Map();
+    page.forEach((e, i) => {
+      const st = status[i];
+      if (!st.photo) {
+        removed.push(e.name);
+        checked.set(e.name, null);
+        return;
+      }
+      if (!st.preview) missingPreviewCount += 1;
+      if (e.size !== st.size) {
+        sizeUpdated += 1;
+        checked.set(e.name, { ...e, size: st.size });
+      }
+    });
 
-  if (invalid || removed.length || sizeUpdated) await putInfoJson(env, albumId, withFileEntries(info, next));
-  return { ok: true, albumId, fileCount: kept.length, invalid, removed, missingPreviewCount, sizeUpdated };
+    const next = all.flatMap((e) => {
+      if (!checked.has(e.name)) return [e];
+      const v = checked.get(e.name);
+      return v ? [v] : [];
+    });
+    const done = start < 0 || start + limit >= all.length;
+    const result = {
+      ok: true,
+      albumId,
+      fileCount: next.length,
+      checked: page.length,
+      invalid,
+      removed,
+      missingPreviewCount,
+      sizeUpdated,
+      cursor: done ? null : page[page.length - 1].name,
+      done
+    };
+    const changed = invalid > 0 || removed.length > 0 || sizeUpdated > 0;
+    return changed ? { info: withFileEntries(info, next), result } : { result };
+  }, { attempts: 2 });
+  return r;
 }
 
-/** POST /api/admin/album/<albumId>/verify-files */
-export async function handleVerifyFiles({ env, params: [albumId] }) {
+/** POST /api/admin/album/<albumId>/verify-files — body { cursor? }; loop until `done`. */
+export async function handleVerifyFiles({ request, env, params: [albumId] }) {
   if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
-  const r = await verifyAlbumFiles(env, albumId);
-  if (!r.ok) return notFound();
-  return jsonNoStore(r);
-}
-
-/** POST /api/admin/albums/verify-files */
-export async function handleVerifyAllFiles({ env }) {
-  const albumIds = await listAlbumIds(env);
-  const results = [];
-  let totalFiles = 0;
-  let totalInvalid = 0;
-  let totalRemoved = 0;
-  let totalMissingPreview = 0;
-  let albumsErr = 0;
-  for (const albumId of albumIds) {
-    try {
-      const r = await verifyAlbumFiles(env, albumId);
-      if (!r.ok) throw new Error("verify_failed");
-      totalFiles += r.fileCount;
-      totalInvalid += r.invalid;
-      totalRemoved += r.removed.length;
-      totalMissingPreview += r.missingPreviewCount;
-      results.push(r);
-    } catch {
-      albumsErr += 1;
-      results.push({ ok: false, albumId });
-    }
-  }
-  return jsonNoStore({ ok: true, albumCount: albumIds.length, albumsErr, totalFiles, totalInvalid, totalRemoved, totalMissingPreview, results });
+  const body = (await readJson(request)) || {};
+  const after = body.cursor ? String(body.cursor) : null;
+  const r = await verifyAlbumFiles(env, albumId, { after });
+  if (!r.ok) return r.response;
+  return jsonNoStore(r.result);
 }
 
 /** GET /api/admin/album/<albumId>/files */
@@ -150,6 +159,8 @@ export async function handlePhotoExists({ env, params: [ref] }) {
  * POST /api/admin/album/<albumId>/file — multipart: photo, preview (JPEG), name?, ref?, overwrite?
  * `ref` (sha256 hex of the source file) is supplied by the admin UI; without it the ref is the
  * sha256 of the uploaded photo bytes. Shared objects are written only if missing (or overwrite=1).
+ * The objects are content-addressed, so they are written first and the info.json entry is
+ * added afterwards with a conditional write; a failed write leaves nothing dangling.
  */
 export async function handleUploadFile({ request, env, params: [albumId] }) {
   if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
@@ -179,7 +190,6 @@ export async function handleUploadFile({ request, env, params: [albumId] }) {
 
   const info = await getInfoJson(env, albumId);
   if (!info) return notFound();
-  const existing = getFileEntries(info).find((e) => e.name === name);
 
   let ref = refIn;
   let photoBody = photo;
@@ -190,6 +200,9 @@ export async function handleUploadFile({ request, env, params: [albumId] }) {
     photoBody = buf;
   }
 
+  // Early check on the snapshot so a plain name clash fails before any object write; the
+  // authoritative check runs again inside the conditional update below.
+  const existing = getFileEntries(info).find((e) => e.name === name);
   if (existing && existing.ref !== ref && !overwrite) {
     return conflict("File already exists (set overwrite=1 to replace)");
   }
@@ -202,20 +215,28 @@ export async function handleUploadFile({ request, env, params: [albumId] }) {
 
   // With overwrite the uploaded bytes are what is stored; otherwise the existing object wins.
   const storedSize = st.photo && !overwrite ? st.size : size;
-  await putInfoJson(env, albumId, upsertInfoFile(info, { name, ref, size: storedSize }));
+  const r = await updateInfoJson(env, albumId, (cur) => {
+    const clash = getFileEntries(cur).find((e) => e.name === name);
+    if (clash && clash.ref !== ref && !overwrite) {
+      return { response: conflict("File already exists (set overwrite=1 to replace)") };
+    }
+    return { info: upsertInfoFile(cur, { name, ref, size: storedSize }) };
+  });
+  if (!r.ok) return r.response;
   return jsonNoStore({ uploaded: true, albumId, name, ref, size: storedSize, stored: writes.length > 0 });
 }
 
 /**
  * POST /api/admin/album/<albumId>/files — body { files: [{ name, ref }], overwrite? }
  * Attach already-stored photos (from another album or a de-duplicated upload) to this album.
+ * At most PAGE_ATTACH_FILES per request (one head() each); the admin UI sends chunks.
  */
 export async function handleAttachFiles({ request, env, params: [albumId] }) {
   if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
 
   const body = await readJson(request);
   if (!body || !Array.isArray(body.files)) return badRequest("Expected { files: [{ name, ref }] }");
-  if (body.files.length > 1000) return badRequest("Too many files (max 1000 per request)");
+  if (body.files.length > PAGE_ATTACH_FILES) return badRequest(`Too many files (max ${PAGE_ATTACH_FILES} per request)`);
   const overwrite = isTruthyFlag(body.overwrite);
 
   const wanted = [];
@@ -230,23 +251,24 @@ export async function handleAttachFiles({ request, env, params: [albumId] }) {
     wanted.push({ name, ref });
   }
 
-  const info = await getInfoJson(env, albumId);
-  if (!info) return notFound();
-
   const status = await mapLimit(wanted, 16, (e) => env.BUCKET.head(photoObjectKey(e.ref)));
   const missing = wanted.filter((_, i) => !status[i]).map((e) => e.ref);
   if (missing.length) return jsonNoStore({ error: "Unknown photo refs", missing }, 400);
   wanted.forEach((e, i) => { e.size = status[i].size; });
 
-  const current = getFileEntries(info);
-  if (!overwrite) {
-    const taken = wanted.filter((w) => current.some((c) => c.name === w.name && c.ref !== w.ref)).map((w) => w.name);
-    if (taken.length) return jsonNoStore({ error: "File names already exist (set overwrite to replace)", conflicts: taken }, 409);
-  }
-
-  const wantedNames = new Set(wanted.map((w) => w.name));
-  const next = [...current.filter((c) => !wantedNames.has(c.name)), ...wanted];
-  await putInfoJson(env, albumId, withFileEntries(info, next));
+  const r = await updateInfoJson(env, albumId, (info) => {
+    const current = getFileEntries(info);
+    if (!overwrite) {
+      const taken = wanted.filter((w) => current.some((c) => c.name === w.name && c.ref !== w.ref)).map((w) => w.name);
+      if (taken.length) {
+        return { response: jsonNoStore({ error: "File names already exist (set overwrite to replace)", conflicts: taken }, 409) };
+      }
+    }
+    const wantedNames = new Set(wanted.map((w) => w.name));
+    const next = [...current.filter((c) => !wantedNames.has(c.name)), ...wanted];
+    return { info: withFileEntries(info, next) };
+  });
+  if (!r.ok) return r.response;
   return jsonNoStore({ attached: wanted.length, albumId, files: wanted });
 }
 
@@ -256,13 +278,13 @@ export async function handleDeleteFile({ env, params: [albumId, nameInPath] }) {
   const name = normalizeJpgName(nameInPath);
   if (!isValidPhotoFileName(name)) return badRequest("Invalid file name");
 
-  const info = await getInfoJson(env, albumId);
-  if (!info) return notFound();
-  const entry = getFileEntries(info).find((e) => e.name === name);
-  if (!entry) return notFound();
-
-  await putInfoJson(env, albumId, removeInfoFile(info, name));
-  return jsonNoStore({ deleted: true, albumId, name, ref: entry.ref });
+  const r = await updateInfoJson(env, albumId, (info) => {
+    const entry = getFileEntries(info).find((e) => e.name === name);
+    if (!entry) return { response: notFound() };
+    return { info: removeInfoFile(info, name), result: { ref: entry.ref } };
+  });
+  if (!r.ok) return r.response;
+  return jsonNoStore({ deleted: true, albumId, name, ref: r.result.ref });
 }
 
 /** PUT /api/admin/album/<albumId>/file/<name> — body { newName }. Metadata-only. */
@@ -277,12 +299,12 @@ export async function handleRenameFile({ request, env, params: [albumId, nameInP
   if (!isValidPhotoFileName(newName)) return badRequest("Invalid newName");
   if (newName === name) return jsonNoStore({ renamed: true, albumId, from: name, to: newName });
 
-  const info = await getInfoJson(env, albumId);
-  if (!info) return notFound();
-  const entries = getFileEntries(info);
-  if (!entries.some((e) => e.name === name)) return notFound();
-  if (entries.some((e) => e.name === newName)) return conflict("Destination name already exists");
-
-  await putInfoJson(env, albumId, renameInfoFile(info, name, newName));
+  const r = await updateInfoJson(env, albumId, (info) => {
+    const entries = getFileEntries(info);
+    if (!entries.some((e) => e.name === name)) return { response: notFound() };
+    if (entries.some((e) => e.name === newName)) return { response: conflict("Destination name already exists") };
+    return { info: renameInfoFile(info, name, newName) };
+  });
+  if (!r.ok) return r.response;
   return jsonNoStore({ renamed: true, albumId, from: name, to: newName });
 }

@@ -1,4 +1,5 @@
 import { extractSecrets } from './albumSecrets.js';
+import { timingSafeEqual } from './crypto.js';
 
 export async function invalidateAlbumCache(env, albumId) {
   // Best-effort: clear persistent cache in Durable Object (if configured)
@@ -83,10 +84,15 @@ export async function checkAlbumSecret(albumId, secret, env) {
   }
 
   const info = loaded.info;
-  const secrets = new Set(loaded.secrets);
   const providedSecret = String(secret || "");
 
-  if (!providedSecret || !secrets.has(providedSecret)) {
+  // Compare against every secret without early exit so timing does not reveal which one matched.
+  let matched = false;
+  for (const s of loaded.secrets) {
+    if (timingSafeEqual(s, providedSecret)) matched = true;
+  }
+
+  if (!providedSecret || !matched) {
     return {
       success: false,
       response: new Response("Invalid secret", { status: 403 })

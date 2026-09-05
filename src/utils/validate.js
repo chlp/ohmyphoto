@@ -14,6 +14,18 @@ export function isValidAlbumSecret(secret) {
   return /^[a-zA-Z0-9_-]{1,256}$/.test(String(secret || ""));
 }
 
+/**
+ * Minimum length for a *new* album secret. The secret is also the HMAC key of every signed
+ * image URL, so anyone holding one image URL can brute-force it offline: 6 hex chars (24 bits)
+ * fall in seconds, 16 chars of this charset (>= 64 bits for hex, ~96 bits for the full
+ * charset) do not. Existing shorter secrets keep working; only newly added ones are checked.
+ */
+export const MIN_ALBUM_SECRET_LENGTH = 16;
+
+export function isStrongAlbumSecret(secret) {
+  return isValidAlbumSecret(secret) && String(secret).length >= MIN_ALBUM_SECRET_LENGTH;
+}
+
 export function normalizeJpgName(input) {
   let name = String(input || "").trim();
   if (!name) return "";

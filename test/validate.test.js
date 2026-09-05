@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isValidAlbumId, isValidAlbumSecret, isValidPhotoFileName, normalizeJpgName } from "../src/utils/validate.js";
+import { MIN_ALBUM_SECRET_LENGTH, isStrongAlbumSecret, isValidAlbumId, isValidAlbumSecret, isValidPhotoFileName, normalizeJpgName } from "../src/utils/validate.js";
+import { compareNames, sortFileEntries } from "../src/utils/albumFiles.js";
 
 describe("isValidAlbumId", () => {
   it("accepts date-prefixed kebab ids", () => {
@@ -24,6 +25,24 @@ describe("isValidAlbumSecret", () => {
     expect(isValidAlbumSecret("has space")).toBe(false);
     expect(isValidAlbumSecret("has#hash")).toBe(false);
     expect(isValidAlbumSecret("")).toBe(false);
+  });
+});
+
+describe("isStrongAlbumSecret", () => {
+  it("requires the fragment-safe charset and the minimum length", () => {
+    expect(MIN_ALBUM_SECRET_LENGTH).toBe(16);
+    expect(isStrongAlbumSecret("a".repeat(16))).toBe(true);
+    expect(isStrongAlbumSecret("a".repeat(15))).toBe(false);
+    expect(isStrongAlbumSecret("a1b2c3")).toBe(false);
+    expect(isStrongAlbumSecret("has space".padEnd(20, "x"))).toBe(false);
+  });
+});
+
+describe("compareNames / sortFileEntries", () => {
+  it("orders numerically so numeric prefixes need no zero padding", () => {
+    const names = ["10.jpg", "2.jpg", "1.jpg", "b.jpg", "A.jpg", "img-100.jpg", "img-20.jpg"];
+    expect([...names].sort(compareNames)).toEqual(["1.jpg", "2.jpg", "10.jpg", "A.jpg", "b.jpg", "img-20.jpg", "img-100.jpg"]);
+    expect(sortFileEntries([{ name: "b10.jpg", ref: "x" }, { name: "b9.jpg", ref: "y" }]).map((e) => e.name)).toEqual(["b9.jpg", "b10.jpg"]);
   });
 });
 

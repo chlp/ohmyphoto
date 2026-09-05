@@ -50,6 +50,17 @@ export function bytesToHex(bytes) {
 }
 
 /**
+ * Cryptographically random lowercase hex string of `byteLength` bytes (2 chars per byte).
+ * @param {number} byteLength
+ * @returns {string}
+ */
+export function randomHex(byteLength) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
+/**
  * Timing-safe string compare.
  * @param {string} a
  * @param {string} b

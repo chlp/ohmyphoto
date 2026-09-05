@@ -229,13 +229,15 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   __mark('album_files_info', __tFiles);
 
   const __tSig = __ompNowMs();
+  // `n` is not part of the signature; the image handler only uses it for Content-Disposition so
+  // a saved original gets the album file name instead of the hash.
   const files = entries.map(async ({ name, ref, size }) => {
     const sig = await imageSig(albumId, ref, matchedSecret);
     const base = `/img/${encodeURIComponent(albumId)}`;
     return {
       name,
       size,
-      photoUrl: `${base}/photos/${ref}?s=${sig}`,
+      photoUrl: `${base}/photos/${ref}?s=${sig}&n=${encodeURIComponent(name)}`,
       previewUrl: `${base}/preview/${ref}?s=${sig}`
     };
   });

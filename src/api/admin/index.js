@@ -10,10 +10,10 @@ import {
   handleRawImage,
   handleRenameFile,
   handleUploadFile,
-  handleVerifyAllFiles,
   handleVerifyFiles
 } from './files.js';
 import { handleGcPhotos } from './gc.js';
+import { handleDeleteTrash, handleListTrash, handleRestoreTrash } from './trash.js';
 
 /**
  * Admin route table. Patterns are matched against the full pathname; capture groups are
@@ -25,7 +25,10 @@ const ROUTES = [
   { method: "POST", pattern: /^\/api\/admin\/generate-album-id$/, handler: handleGenerateAlbumId },
 
   { method: "GET", pattern: /^\/api\/admin\/albums$/, handler: handleListAlbums },
-  { method: "POST", pattern: /^\/api\/admin\/albums\/verify-files$/, handler: handleVerifyAllFiles },
+
+  { method: "GET", pattern: /^\/api\/admin\/trash$/, handler: handleListTrash },
+  { method: "POST", pattern: /^\/api\/admin\/trash\/restore$/, handler: handleRestoreTrash },
+  { method: "DELETE", pattern: /^\/api\/admin\/trash\/(.+)$/, handler: handleDeleteTrash },
 
   { method: "GET", pattern: /^\/api\/admin\/photo\/([^/]+)$/, handler: handlePhotoExists },
   { method: "POST", pattern: /^\/api\/admin\/photos\/gc$/, handler: handleGcPhotos },
