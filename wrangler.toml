@@ -88,3 +88,5 @@ head_sampling_rate = 1
 
 [ai]
 binding = "AI"
+# Workers AI has no local simulator; declare the binding remote to silence the dev warning.
+remote = true

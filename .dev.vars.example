@@ -1,0 +1,5 @@
+# Copy to .dev.vars (gitignored). Turnstile "1x0000..." values are Cloudflare's test keys:
+# they always pass and never contact a real widget.
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+ADMIN_TOKEN=dev-admin

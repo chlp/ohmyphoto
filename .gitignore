@@ -1,3 +1,9 @@
 .DS_Store
 node_modules
 .wrangler
+
+# Local secrets (ADMIN_TOKEN, Turnstile keys); copy .dev.vars.example
+.dev.vars
+
+# Local bucket mirror for cp_albums_local.sh
+r2/
