@@ -114,7 +114,7 @@ describe("album lifecycle", () => {
     expect((await api(`/album/${albumId}/file`, uploadForm("c.jpg", JPEG, JPEG, { ref: "zz" }))).status).toBe(400);
 
     const files = await (await api(`/album/${albumId}/files`)).json();
-    expect(files.files.map((f) => [f.name, f.ref])).toEqual([["a.jpg", refA], ["b.jpg", await sha256(JPEG2)]]);
+    expect(files.files.map((f) => [f.name, f.ref, f.size])).toEqual([["a.jpg", refA, JPEG.length], ["b.jpg", await sha256(JPEG2), JPEG2.length]]);
     expect(files.files[0].previewUrl).toBe(`/api/admin/album/${albumId}/raw/preview/${refA}`);
     expect((await api(files.files[0].previewUrl.replace("/api/admin", ""))).status).toBe(200);
 
@@ -128,7 +128,12 @@ describe("album lifecycle", () => {
     expect(g0.headers.get("X-OhMyPhoto-FileCount")).toBe("2");
     const g = await g0.json();
     expect(g.title).toBe("Lake");
-    expect(g.files.map((f) => f.name)).toEqual(["a.jpg", "b.jpg"]);
+    expect(g.files.map((f) => [f.name, f.size])).toEqual([["a.jpg", JPEG.length], ["b.jpg", JPEG2.length]]);
+    // client-side ZIP gate: two small files are well within the default limits
+    expect(g.zip).toEqual({
+      available: true, reason: null, fileCount: 2, totalBytes: JPEG.length + JPEG2.length,
+      sizeKnown: true, maxFiles: 100, maxBytes: 500 * 1024 * 1024
+    });
 
     const sig = await imageSig(albumId, refA, secret);
     expect(g.files[0].photoUrl).toBe(`/img/${albumId}/photos/${refA}?s=${sig}`);
@@ -161,7 +166,7 @@ describe("album lifecycle", () => {
     expect(g2.title).toBe("Lake 2");
     const info = await (await env.BUCKET.get(`albums/${albumId}/info.json`)).json();
     expect(info.secrets).toEqual({ newsecret: {} });
-    expect(info.files).toEqual([{ name: "a.jpg", ref: refA }, { name: "b.jpg", ref: await sha256(JPEG2) }]);
+    expect(info.files).toEqual([{ name: "a.jpg", ref: refA, size: JPEG.length }, { name: "b.jpg", ref: await sha256(JPEG2), size: JPEG2.length }]);
 
     // rename / delete photo are metadata-only: shared objects untouched
     expect((await api(`/album/${albumId}/file/a.jpg`, jsonInit("PUT", { newName: "b.jpg" }))).status).toBe(409);
@@ -169,7 +174,7 @@ describe("album lifecycle", () => {
     expect((await api(`/album/${albumId}/file/b.jpg`, { method: "DELETE" })).status).toBe(200);
     expect((await api(`/album/${albumId}/file/b.jpg`, { method: "DELETE" })).status).toBe(404);
     const after = await (await api(`/album/${albumId}/files`)).json();
-    expect(after.files.map((f) => [f.name, f.ref])).toEqual([["z.jpg", refA]]);
+    expect(after.files.map((f) => [f.name, f.ref, f.size])).toEqual([["z.jpg", refA, JPEG.length]]);
     expect(await env.BUCKET.head(`photos/${refA}.jpg`)).not.toBeNull();
     expect(await env.BUCKET.head(`photos/${await sha256(JPEG2)}.jpg`)).not.toBeNull();
     const gz = await (await gallery(albumId, "newsecret")).json();
@@ -210,7 +215,7 @@ describe("album lifecycle", () => {
     expect((await api(`/album/${b}/files`, jsonInit("POST", { files: [] }))).status).toBe(200);
 
     const gb = await (await gallery(b, "sb")).json();
-    expect(gb.files.map((f) => f.name)).toEqual(["fav-1.jpg"]);
+    expect(gb.files.map((f) => [f.name, f.size])).toEqual([["fav-1.jpg", JPEG.length]]);
     expect(gb.files[0].photoUrl).toBe(`/img/${b}/photos/${ref}?s=${await imageSig(b, ref, "sb")}`);
     expect((await SELF.fetch(`https://x${gb.files[0].photoUrl}`)).status).toBe(200);
     // a signature from album a does not open the same object through album b
@@ -258,16 +263,41 @@ describe("album lifecycle", () => {
     await api(`/album/${albumId}/file`, uploadForm("gone.jpg", JPEG2));
     await env.BUCKET.delete([`photos/${gone}.jpg`, `previews/${await sha256(JPEG)}.jpg`]);
 
+    // strip the recorded size of kept.jpg: verify must backfill it from the object
+    const infoKey = `albums/${albumId}/info.json`;
+    const before = await (await env.BUCKET.get(infoKey)).json();
+    before.files = before.files.map(({ name, ref }) => ({ name, ref }));
+    await env.BUCKET.put(infoKey, JSON.stringify(before));
+
     const r = await (await api(`/album/${albumId}/verify-files`, { method: "POST" })).json();
-    expect(r).toEqual({ ok: true, albumId, fileCount: 1, removed: ["gone.jpg"], missingPreviewCount: 1 });
-    const info = await (await env.BUCKET.get(`albums/${albumId}/info.json`)).json();
-    expect(info.files).toEqual([{ name: "kept.jpg", ref: await sha256(JPEG) }]);
+    expect(r).toEqual({ ok: true, albumId, fileCount: 1, removed: ["gone.jpg"], missingPreviewCount: 1, sizeUpdated: 1 });
+    const info = await (await env.BUCKET.get(infoKey)).json();
+    expect(info.files).toEqual([{ name: "kept.jpg", ref: await sha256(JPEG), size: JPEG.length }]);
     expect((await api(`/album/nope/verify-files`, { method: "POST" })).status).toBe(404);
 
     const all = await (await api("/albums/verify-files", { method: "POST" })).json();
     expect(all.ok).toBe(true);
     expect(all.albumsErr).toBe(0);
     expect(all.results.find((x) => x.albumId === albumId)).toMatchObject({ ok: true, fileCount: 1, removed: [] });
+  });
+
+  it("gallery reports the ZIP download as unavailable while sizes are unknown", async () => {
+    const albumId = "2025.06.03-legacy-no-sizes";
+    await api("/album", jsonInit("POST", { albumId, secret: "abc" }));
+    await api(`/album/${albumId}/file`, uploadForm("x.jpg"));
+    const infoKey = `albums/${albumId}/info.json`;
+    const info = await (await env.BUCKET.get(infoKey)).json();
+    info.files = info.files.map(({ name, ref }) => ({ name, ref }));
+    await env.BUCKET.put(infoKey, JSON.stringify(info));
+    await api(`/album/${albumId}`, jsonInit("PUT", { title: "bust cache" }));
+
+    const g = await (await gallery(albumId, "abc")).json();
+    expect(g.files[0].size).toBeUndefined();
+    expect(g.zip).toMatchObject({ available: false, reason: "size_unknown", fileCount: 1, sizeKnown: false });
+
+    await api(`/album/${albumId}/verify-files`, { method: "POST" });
+    const g2 = await (await gallery(albumId, "abc")).json();
+    expect(g2.zip).toMatchObject({ available: true, reason: null, totalBytes: JPEG.length });
   });
 
   it("gc deletes shared objects no album references (dry run first)", async () => {

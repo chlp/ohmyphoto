@@ -6,6 +6,7 @@ import { issueHumanBypassToken, verifyHumanBypassToken } from '../utils/session.
 import { getClientIp, readJson } from '../utils/http.js';
 import { getCookieValue, makeSetCookie } from '../utils/cookies.js';
 import { parseFileEntries } from '../utils/albumFiles.js';
+import { zipPolicy } from '../utils/albumZip.js';
 
 /**
  * Handle POST /api/album/<albumId>
@@ -228,11 +229,12 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   __mark('album_files_info', __tFiles);
 
   const __tSig = __ompNowMs();
-  const files = entries.map(async ({ name, ref }) => {
+  const files = entries.map(async ({ name, ref, size }) => {
     const sig = await imageSig(albumId, ref, matchedSecret);
     const base = `/img/${encodeURIComponent(albumId)}`;
     return {
       name,
+      size,
       photoUrl: `${base}/photos/${ref}?s=${sig}`,
       previewUrl: `${base}/preview/${ref}?s=${sig}`
     };
@@ -241,10 +243,14 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   const resolvedFiles = await Promise.all(files);
   __mark('image_sig_all', __tSig);
 
+  // Client-side ZIP download gate (the browser builds the archive from photoUrl's).
+  const { available, reason, totalBytes, sizeKnown, maxFiles, maxBytes } = zipPolicy(entries, env);
+
   const resp = {
     albumId,
     title: String(info?.title || "OhMyPhoto"),
-    files: resolvedFiles
+    files: resolvedFiles,
+    zip: { available, reason, fileCount: entries.length, totalBytes, sizeKnown, maxFiles, maxBytes }
   };
 
   const extra = {

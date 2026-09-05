@@ -1,14 +1,16 @@
 import { isValidPhotoFileName } from './validate.js';
 
 /**
- * `info.json.files` entries: { name: "001_beach.jpg", ref: "<sha256 hex>" }
+ * `info.json.files` entries: { name: "001_beach.jpg", ref: "<sha256 hex>", size?: <bytes> }
  *
  * Photos are stored once, content-addressed, and shared across albums:
  *   photos/<ref>.jpg     original
  *   previews/<ref>.jpg   preview
  * `name` is the display/download name and is unique within an album; `ref` is the storage
- * identity (SHA-256 of the source file). The array order is the gallery order (admin writes
- * keep it sorted by name).
+ * identity (SHA-256 of the source file). `size` is the byte size of the original object,
+ * recorded on upload/attach/verify and used by the gallery's "download all as ZIP" gate
+ * (see src/utils/albumZip.js). The array order is the gallery order (admin writes keep it
+ * sorted by name).
  */
 
 export const PHOTO_REF_RE = /^[a-f0-9]{64}$/;
@@ -36,18 +38,25 @@ export function imageObjectKey(kind, ref) {
   return null;
 }
 
-/** Normalize one raw `files` entry; null if invalid. */
+/** Non-negative integer byte size, or undefined if absent/invalid. */
+export function normalizeFileSize(raw) {
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n >= 0 ? n : undefined;
+}
+
+/** Normalize one raw `files` entry; null if invalid. `size` is kept only when valid. */
 export function normalizeFileEntry(raw) {
   if (!raw || typeof raw !== "object") return null;
   const name = String(raw.name || "").trim();
   const ref = String(raw.ref || "").trim().toLowerCase();
   if (!isValidPhotoFileName(name) || !isValidPhotoRef(ref)) return null;
-  return { name, ref };
+  const size = normalizeFileSize(raw.size);
+  return size === undefined ? { name, ref } : { name, ref, size };
 }
 
 /**
  * Valid entries from `info.files`, de-duplicated by name (first wins), original order kept.
- * @returns {Array<{name: string, ref: string}>}
+ * @returns {Array<{name: string, ref: string, size?: number}>}
  */
 export function parseFileEntries(info) {
   const raw = info && Array.isArray(info.files) ? info.files : [];

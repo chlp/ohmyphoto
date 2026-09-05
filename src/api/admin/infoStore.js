@@ -1,6 +1,6 @@
 import { invalidateAlbumCache } from '../../utils/album.js';
 import { isValidAlbumId } from '../../utils/validate.js';
-import { parseFileEntries, sortFileEntries } from '../../utils/albumFiles.js';
+import { normalizeFileEntry, parseFileEntries, sortFileEntries } from '../../utils/albumFiles.js';
 
 /**
  * R2 access helpers for album metadata (info.json) used by the admin API.
@@ -56,18 +56,18 @@ export function getFileEntries(info) {
   return sortFileEntries(parseFileEntries(info));
 }
 
-/** Return `info` with `files` replaced by `entries` (sorted by name). */
+/** Return `info` with `files` replaced by `entries` (sorted by name, `{ name, ref, size? }` only). */
 export function withFileEntries(info, entries) {
   return {
     ...(info && typeof info === "object" ? info : {}),
-    files: sortFileEntries(entries).map(({ name, ref }) => ({ name, ref }))
+    files: sortFileEntries(entries.map(normalizeFileEntry).filter(Boolean))
   };
 }
 
-/** Add or replace (by name) one entry. */
+/** Add or replace (by name) one entry `{ name, ref, size? }`. */
 export function upsertInfoFile(info, entry) {
   const entries = getFileEntries(info).filter((e) => e.name !== entry.name);
-  entries.push({ name: entry.name, ref: entry.ref });
+  entries.push(entry);
   return withFileEntries(info, entries);
 }
 

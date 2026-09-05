@@ -19,6 +19,12 @@ The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
 - The page’s JavaScript reads `location.hash` and sends the secret to the Worker **only to authenticate** access to the album
 - The Worker validates it against `info.json` and **does not persist** the secret anywhere
 
+## Download all as ZIP
+
+- Visitors can download every original of an album as one `.zip`. The archive is assembled **in the browser** from the signed image URLs (no compression, JPEGs don't shrink); the Worker never touches it, so this works on the Workers Free plan.
+- The feature is offered only for albums with at most **100 photos** and at most **500 MB** of originals (`ZIP_MAX_FILES`, `ZIP_MAX_BYTES`; `ZIP_DOWNLOAD=0` turns it off). Larger albums still show the button, and clicking it explains exactly which limit was exceeded.
+- Chromium browsers stream the archive straight to disk (save dialog); other browsers build it in memory and then trigger a normal download.
+
 ## Bot protection (Cloudflare Turnstile captcha)
 
 - **Enable/disable**: if `TURNSTILE_SECRET_KEY` is set, the Worker will require Turnstile verification; if it’s unset, bot protection is effectively disabled.

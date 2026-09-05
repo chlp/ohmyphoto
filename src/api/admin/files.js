@@ -33,18 +33,19 @@ async function sha256HexOfBuffer(buf) {
   return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", buf)));
 }
 
-/** head() both shared objects of a ref. */
+/** head() both shared objects of a ref; `size` is the original's byte size (undefined if missing). */
 async function refObjectsExist(env, ref) {
   const [photo, preview] = await Promise.all([
     env.BUCKET.head(photoObjectKey(ref)),
     env.BUCKET.head(previewObjectKey(ref))
   ]);
-  return { photo: !!photo, preview: !!preview };
+  return { photo: !!photo, preview: !!preview, size: photo ? photo.size : undefined };
 }
 
 /**
  * Verify `files` of one album against storage: entries whose photos/<ref>.jpg is missing are
- * dropped, missing previews are counted. One head() pair per entry, no listing.
+ * dropped, missing previews are counted, and each kept entry's `size` is (re)recorded from
+ * the object. One head() pair per entry, no listing.
  */
 export async function verifyAlbumFiles(env, albumId) {
   const info = await getInfoJson(env, albumId);
@@ -56,8 +57,16 @@ export async function verifyAlbumFiles(env, albumId) {
   const removed = prev.filter((_, i) => !status[i].photo).map((e) => e.name);
   const missingPreviewCount = status.filter((s) => s.photo && !s.preview).length;
 
-  if (removed.length) await putInfoJson(env, albumId, withFileEntries(info, kept));
-  return { ok: true, albumId, fileCount: kept.length, removed, missingPreviewCount };
+  let sizeUpdated = 0;
+  const next = prev.flatMap((e, i) => {
+    if (!status[i].photo) return [];
+    if (e.size === status[i].size) return [e];
+    sizeUpdated += 1;
+    return [{ ...e, size: status[i].size }];
+  });
+
+  if (removed.length || sizeUpdated) await putInfoJson(env, albumId, withFileEntries(info, next));
+  return { ok: true, albumId, fileCount: kept.length, removed, missingPreviewCount, sizeUpdated };
 }
 
 /** POST /api/admin/album/<albumId>/verify-files */
@@ -98,9 +107,10 @@ export async function handleListFiles({ env, params: [albumId] }) {
   const info = await getInfoJson(env, albumId);
   if (!info) return notFound();
   const base = `/api/admin/album/${encodeURIComponent(albumId)}/raw`;
-  const files = getFileEntries(info).map(({ name, ref }) => ({
+  const files = getFileEntries(info).map(({ name, ref, size }) => ({
     name,
     ref,
+    size,
     photoUrl: `${base}/photos/${ref}`,
     previewUrl: `${base}/preview/${ref}`
   }));
@@ -168,6 +178,7 @@ export async function handleUploadFile({ request, env, params: [albumId] }) {
 
   let ref = refIn;
   let photoBody = photo;
+  const size = photo.size;
   if (!ref) {
     const buf = await photo.arrayBuffer();
     ref = await sha256HexOfBuffer(buf);
@@ -184,8 +195,10 @@ export async function handleUploadFile({ request, env, params: [albumId] }) {
   if (!st.preview || overwrite) writes.push(env.BUCKET.put(previewObjectKey(ref), preview, JPEG_META));
   await Promise.all(writes);
 
-  await putInfoJson(env, albumId, upsertInfoFile(info, { name, ref }));
-  return jsonNoStore({ uploaded: true, albumId, name, ref, stored: writes.length > 0 });
+  // With overwrite the uploaded bytes are what is stored; otherwise the existing object wins.
+  const storedSize = st.photo && !overwrite ? st.size : size;
+  await putInfoJson(env, albumId, upsertInfoFile(info, { name, ref, size: storedSize }));
+  return jsonNoStore({ uploaded: true, albumId, name, ref, size: storedSize, stored: writes.length > 0 });
 }
 
 /**
@@ -218,6 +231,7 @@ export async function handleAttachFiles({ request, env, params: [albumId] }) {
   const status = await mapLimit(wanted, 16, (e) => env.BUCKET.head(photoObjectKey(e.ref)));
   const missing = wanted.filter((_, i) => !status[i]).map((e) => e.ref);
   if (missing.length) return jsonNoStore({ error: "Unknown photo refs", missing }, 400);
+  wanted.forEach((e, i) => { e.size = status[i].size; });
 
   const current = getFileEntries(info);
   if (!overwrite) {

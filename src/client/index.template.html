@@ -110,6 +110,19 @@
     }
     .status-card p { margin: 10px 0; }
     .status-muted { opacity: 0.75; font-size: 14px; }
+
+    /* Album toolbar: "download all as ZIP" (built client-side, see ui.js) */
+    .album-toolbar { display: none; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 18px; }
+    .album-toolbar[data-visible="1"] { display: flex; }
+    .album-btn {
+      appearance: none; border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 10px;
+      padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer;
+      background: #2c3e50; color: #fff;
+    }
+    .album-btn.secondary { background: #fff; color: #2c3e50; }
+    .album-btn[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+    .album-note { font-size: 14px; opacity: 0.8; }
+    .album-note.warn { opacity: 1; color: #8a3b12; }
   </style>
 
   <!-- Keep Turnstile -->
@@ -135,6 +148,7 @@
     <div class="container">
       <div id="page-content">
         <div id="status" style="padding:16px 0;"></div>
+        <div id="toolbar" class="album-toolbar"></div>
         <div id="grid" class="gallery-grid"></div>
       </div>
     </div>
