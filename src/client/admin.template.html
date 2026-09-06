@@ -355,6 +355,13 @@
             <button class="primary" id="uploadBtn">Upload</button>
           </div>
           <div class="hint">Drop files here or choose them. Any image format; converted in the browser to JPEG 3000px + 1000px preview. Photos already uploaded anywhere are attached without re-uploading.</div>
+          <details class="section" id="alsoAddDetails" style="margin-top:10px;">
+            <summary>Also add the uploaded photos to other albums <span class="muted small" id="alsoAddCount"></span></summary>
+            <div style="padding:8px 0 0 16px;">
+              <div class="hint" style="margin:0 0 8px;">Photos are stored once; the albums ticked here only get references to the photos uploaded in this batch.</div>
+              <div class="row" id="alsoAddList"></div>
+            </div>
+          </details>
           <div class="status muted small" id="uploadStatus"></div>
         </div>
 
@@ -1203,6 +1210,8 @@
         uploadInputEl.value = '';
         $('srcFilesGrid').innerHTML = '';
         $('srcStatus').textContent = '';
+        for (const cb of $('alsoAddList').querySelectorAll('input[type=checkbox]')) cb.checked = false;
+        updateAlsoAddCount();
         $('srcDetails').open = false;
         srcSelected = new Map();
       }
@@ -1466,8 +1475,10 @@
       btn.disabled = true;
       uploadStatusEl.textContent = `Processing ${list.length} file(s)...`;
 
+      const alsoAdd = alsoAddTargets().filter((id) => id !== albumId);
       let reused = 0;
       const failed = []; // [fileName, reason]
+      const done = []; // { name, ref } of every photo now in this album (attached or uploaded)
       try {
         for (let i = 0; i < list.length; i++) {
           const file = list[i];
@@ -1487,7 +1498,7 @@
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ files: [{ name: outName, ref }] })
                 });
-                if (r.ok) { reused += 1; continue; }
+                if (r.ok) { reused += 1; done.push({ name: outName, ref }); continue; }
                 if (r.status !== 409) {
                   failed.push([file.name, `attach ${r.status} ${await r.text()}`]);
                   continue;
@@ -1525,7 +1536,10 @@
           });
           if (!r.ok) {
             failed.push([file.name, `upload ${r.status} ${await r.text()}`]);
+            continue;
           }
+          const saved = await r.json().catch(() => null);
+          done.push({ name: (saved && saved.name) || outName, ref: (saved && saved.ref) || ref });
         }
       } finally {
         btn.disabled = false;
@@ -1535,6 +1549,25 @@
       let msg = `Uploaded ${okCount}/${list.length} file(s)`;
       if (reused) msg += `, ${reused} already existed and were attached without re-uploading`;
       if (failed.length) msg += `. Failed (${failed.length}): ` + failed.map(([n, why]) => `${n} (${why})`).join('; ');
+
+      // "Also add to": the same { name, ref } entries go into every ticked album (references only).
+      if (alsoAdd.length && done.length) {
+        const parts = [];
+        for (const target of alsoAdd) {
+          try {
+            const { added, skipped } = await attachFilesChunked(target, done, (n) => {
+              uploadStatusEl.textContent = `Adding ${done.length} photo(s) to ${target}... ${n} done`;
+            });
+            parts.push(`${target}: ${added} added${skipped ? `, ${skipped} skipped` : ''}`);
+            const cached = lastAlbums.find((a) => a.albumId === target);
+            if (cached) cached.fileCount = (cached.fileCount || 0) + added;
+          } catch (e) {
+            parts.push(`${target}: failed (${errText(e)})`);
+            failed.push([`also add to ${target}`, errText(e)]);
+          }
+        }
+        msg += `. Also added to: ` + parts.join('; ');
+      }
       uploadStatusEl.textContent = msg;
       notify(failed.length ? `${failed.length} file(s) failed, see the upload status` : msg, failed.length ? 'error' : 'ok');
       if (!failed.length) uploadInputEl.value = '';
@@ -1559,7 +1592,43 @@
     // ---- Add photos from another album (reference only, no copies) ----
     let srcSelected = new Map(); // ref -> name
 
+    // Checkbox list of the other albums under the upload zone ("also add to"). Keeps ticks across refreshes.
+    function fillAlsoAddList() {
+      const list = $('alsoAddList');
+      if (!list) return;
+      const checked = new Set(alsoAddTargets());
+      list.innerHTML = '';
+      for (const a of lastAlbums) {
+        if (a.albumId === currentEditAlbumId) continue;
+        const lab = document.createElement('label');
+        lab.className = 'check';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.albumId = a.albumId;
+        cb.checked = checked.has(a.albumId);
+        cb.onchange = updateAlsoAddCount;
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(a.title ? `${a.albumId} — ${a.title}` : a.albumId));
+        list.appendChild(lab);
+      }
+      if (!list.children.length) list.innerHTML = '<span class="muted small">No other albums.</span>';
+      updateAlsoAddCount();
+    }
+
+    function alsoAddTargets() {
+      const list = $('alsoAddList');
+      if (!list) return [];
+      return [...list.querySelectorAll('input[type=checkbox]:checked')].map((cb) => cb.dataset.albumId);
+    }
+
+    function updateAlsoAddCount() {
+      const n = alsoAddTargets().length;
+      const el = $('alsoAddCount');
+      if (el) el.textContent = n ? `(${n} selected)` : '';
+    }
+
     function fillSrcAlbumSelect() {
+      fillAlsoAddList();
       const sel = $('srcAlbumSelect');
       if (!sel) return;
       const prev = sel.value;
@@ -1628,14 +1697,11 @@
       }
     }
 
-    async function addSelectedFromSrc() {
-      if (!currentEditAlbumId) return;
-      const status = $('srcStatus');
-      const files = [...srcSelected].map(([ref, name]) => ({ name, ref }));
-      if (!files.length) return notify('Select photos first', 'error');
-      // The server accepts ATTACH_CHUNK entries per request (one head() each). Chunks that hit a
-      // name conflict are collected and re-sent with overwrite after one confirmation.
-      const postChunk = (chunk, overwrite) => api(`/api/admin/album/${encodeURIComponent(currentEditAlbumId)}/files`, {
+    // Attach existing photos ({ name, ref }) to an album in ATTACH_CHUNK-sized requests (the server
+    // does one head() per entry). Chunks that hit a name conflict are collected and re-sent with
+    // overwrite after a single confirmation. Returns { added, skipped }; throws on any other error.
+    async function attachFilesChunked(albumId, files, onProgress) {
+      const postChunk = (chunk, overwrite) => api(`/api/admin/album/${encodeURIComponent(albumId)}/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(overwrite ? { files: chunk, overwrite: true } : { files: chunk })
@@ -1646,7 +1712,7 @@
       const conflictNames = [];
       let added = 0;
       for (let i = 0; i < chunks.length; i++) {
-        status.textContent = `Adding ${files.length} photo(s)... ${added} done`;
+        if (onProgress) onProgress(added, files.length);
         const r = await postChunk(chunks[i], false);
         const data = await r.json().catch(() => null);
         if (r.ok) { added += chunks[i].length; continue; }
@@ -1655,20 +1721,40 @@
           conflictNames.push(...data.conflicts);
           continue;
         }
-        status.textContent = `Add failed: ${r.status} ${data ? JSON.stringify(data) : ''}`;
-        return;
+        throw new Error(`${r.status} ${data ? JSON.stringify(data) : ''}`);
       }
       if (conflicting.length) {
-        if (!confirm(`These names already exist in this album with a different photo:\n${conflictNames.join('\n')}\n\nReplace them?`)) {
-          status.textContent = added ? `Added ${added} photo(s); ${conflictNames.length} conflicting name(s) skipped.` : 'Cancelled.';
-          await refreshFiles();
-          return;
+        if (!confirm(`These names already exist in album "${albumId}" with a different photo:\n${conflictNames.join('\n')}\n\nReplace them?`)) {
+          return { added, skipped: conflictNames.length };
         }
         for (const chunk of conflicting) {
           const r2 = await postChunk(chunk, true);
-          if (!r2.ok) { status.textContent = `Add failed: ${r2.status} ${await r2.text()}`; return; }
+          if (!r2.ok) throw new Error(`${r2.status} ${await r2.text()}`);
           added += chunk.length;
         }
+      }
+      return { added, skipped: 0 };
+    }
+
+    async function addSelectedFromSrc() {
+      if (!currentEditAlbumId) return;
+      const status = $('srcStatus');
+      const files = [...srcSelected].map(([ref, name]) => ({ name, ref }));
+      if (!files.length) return notify('Select photos first', 'error');
+      let res;
+      try {
+        res = await attachFilesChunked(currentEditAlbumId, files, (done) => {
+          status.textContent = `Adding ${files.length} photo(s)... ${done} done`;
+        });
+      } catch (e) {
+        status.textContent = `Add failed: ${errText(e)}`;
+        return;
+      }
+      const { added, skipped } = res;
+      if (skipped) {
+        status.textContent = added ? `Added ${added} photo(s); ${skipped} conflicting name(s) skipped.` : 'Cancelled.';
+        await refreshFiles();
+        return;
       }
       status.textContent = `Added ${added} photo(s).`;
       notify(`Added ${added} photo(s)`, 'ok');
