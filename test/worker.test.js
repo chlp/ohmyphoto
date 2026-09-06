@@ -160,6 +160,8 @@ describe("album lifecycle", () => {
     const g = await g0.json();
     expect(g.title).toBe("Lake");
     expect(g.files.map((f) => [f.name, f.size])).toEqual([["a.jpg", JPEG.length], ["b.jpg", JPEG2.length]]);
+    // `ref` is exposed for photo deep links (`#<secret>/<ref>` opens the lightbox on that photo)
+    expect(g.files.map((f) => f.ref)).toEqual([refA, await sha256(JPEG2)]);
     // client-side ZIP gate: two small files are well within the default limits
     expect(g.zip).toEqual({
       available: true, reason: null, fileCount: 2, totalBytes: JPEG.length + JPEG2.length,

@@ -236,12 +236,14 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
 
   const __tSig = __ompNowMs();
   // `n` is not part of the signature; the image handler only uses it for Content-Disposition so
-  // a saved original gets the album file name instead of the hash.
+  // a saved original gets the album file name instead of the hash. `ref` is exposed so the
+  // gallery can deep-link one photo (`/<albumId>#<secret>/<ref>`); it is already in the URLs.
   const files = entries.map(async ({ name, ref, size }) => {
     const sig = await imageSig(albumId, ref, matchedSecret);
     const base = `/img/${encodeURIComponent(albumId)}`;
     return {
       name,
+      ref,
       size,
       photoUrl: `${base}/photos/${ref}?s=${sig}&n=${encodeURIComponent(name)}`,
       previewUrl: `${base}/preview/${ref}?s=${sig}`

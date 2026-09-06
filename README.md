@@ -15,7 +15,7 @@ This is a **minimal private photo gallery** built on **Cloudflare Workers + R2**
 
 ### “PrivateBin style” secret via URL hash
 
-The album secret is provided in the URL fragment: `/<albumId>#<secret>`.
+The album secret is provided in the URL fragment: `/<albumId>#<secret>`. A link to one photo appends its content hash: `/<albumId>#<secret>/<ref>` opens the gallery with that photo in the lightbox.
 
 - **The `#...` fragment is not sent in HTTP requests** (so it doesn’t end up in server logs/referrers by default)
 - The page’s JavaScript reads `location.hash` and sends the secret to the Worker **only to authenticate** access to the album
@@ -71,6 +71,7 @@ The admin UI shows how often each album was opened: a total per album in the lis
 ## Gallery for visitors
 
 - Grid of previews; the lightbox has close/prev/next buttons, keyboard navigation (Esc, arrows, Home/End), swipe on touch screens, a `1 / 42` counter, the file name and a **Download** link that saves the original under its album name.
+- While the lightbox is open the address bar shows `/<albumId>#<secret>/<ref>` for the current photo and a **Copy link** button puts that URL on the clipboard, so a visitor can share a direct link to one photo. Opening the viewer adds one history entry, so the Back button (or swipe-back on a phone) closes it instead of leaving the album; closing restores `#<secret>`. A link whose photo is no longer in the album shows the whole album with a short note.
 - A preview that fails to load (for example the per-IP image rate limit when a whole family shares one connection) is retried automatically.
 - Error pages explain what to do in plain words ("the access code is the part of the link after #").
 

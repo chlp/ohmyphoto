@@ -61,7 +61,8 @@
         var parts = location.pathname.split('/').filter(Boolean);
         var albumId = parts[0] ? decodeURIComponent(parts[0]) : '';
         if (!albumId) return;
-        var secret = String(location.hash || '').replace(/^#/, '');
+        // hash = "<secret>" or "<secret>/<photo ref>" (deep link to one photo); ui.js parses it the same way
+        var secret = String(location.hash || '').replace(/^#/, '').split('/')[0];
         window.__ohmyphotoAlbumFetchKey = albumId + '#' + secret;
         window.__ohmyphotoAlbumFetch = fetch('/api/album/' + encodeURIComponent(albumId), {
           method: 'POST',
@@ -167,6 +168,11 @@
     }
     .lightbox-bar .lightbox-name { max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .lightbox-bar a { color: #fff; text-decoration: underline; }
+    .lightbox-bar button.lightbox-copy {
+      appearance: none; border: 0; background: transparent; padding: 0; font: inherit;
+      color: #fff; text-decoration: underline; cursor: pointer;
+    }
+    .lightbox-bar button.lightbox-copy[data-copied="1"] { text-decoration: none; color: #9fe29f; }
     @media (max-width: 768px) {
       .lightbox .lightbox-content { flex: none; height: 100%; padding: 8px 8px 52px; }
       .lightbox button.lightbox-close { font-size: 35px; }
@@ -245,6 +251,7 @@
       <span id="lightbox-counter" aria-live="polite"></span>
       <span id="lightbox-name" class="lightbox-name"></span>
       <a id="lightbox-download" href="#" download>Download</a>
+      <button type="button" class="lightbox-copy" id="lightbox-copy" aria-label="Copy a link to this photo">Copy link</button>
     </div>
   </div>
 

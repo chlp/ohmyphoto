@@ -26,13 +26,123 @@ import { createZipWriter } from './zip.js';
   }
 
   // ---------------------------------------------------------------------------
+  // URL fragment: "#<secret>" or "#<secret>/<photo ref>" (deep link that opens one photo in the
+  // lightbox). Secrets never contain "/" (validated server-side), so the first "/" is the split.
+  // The inline early-fetch script in index.template.html parses the secret the same way.
+  // ---------------------------------------------------------------------------
+  function parseAlbumHash(hash) {
+    const raw = String(hash || '').replace(/^#/, '');
+    const slash = raw.indexOf('/');
+    if (slash < 0) return { secret: raw, photoRef: '' };
+    return { secret: raw.slice(0, slash), photoRef: raw.slice(slash + 1) };
+  }
+
+  function buildAlbumHash(secret, photoRef) {
+    const s = String(secret || '');
+    if (!s) return '';
+    return photoRef ? `#${s}/${photoRef}` : `#${s}`;
+  }
+
+  /** Rewrite the fragment in place (no navigation, no history entry) so the address bar is shareable. */
+  function setPhotoHash(photoRef) {
+    const { secret } = parseAlbumHash(location.hash);
+    if (!secret) return;
+    const next = buildAlbumHash(secret, photoRef);
+    if (location.hash === next) return;
+    try {
+      history.replaceState(history.state, '', `${location.pathname}${location.search || ''}${next}`);
+    } catch (_) {
+      // replaceState can throw in odd embedding contexts; the deep link is a convenience only
+    }
+  }
+
+  /** Add one history entry for the viewer so Back closes it (see popstate handler in initLightbox). */
+  function pushPhotoHash(photoRef) {
+    const { secret } = parseAlbumHash(location.hash);
+    if (!secret) return;
+    const next = buildAlbumHash(secret, photoRef);
+    try {
+      history.pushState(LIGHTBOX_STATE, '', `${location.pathname}${location.search || ''}${next}`);
+    } catch (_) {
+      // fall back to a plain in-place rewrite; Back will then leave the page as before
+      setPhotoHash(photoRef);
+    }
+  }
+
+  /** Absolute URL of the photo currently shown (what "Copy link" copies). */
+  function currentPhotoLink() {
+    const it = __lightboxItems[__lightboxIndex];
+    const { secret } = parseAlbumHash(location.hash);
+    if (!it || !secret) return '';
+    return `${location.origin}${location.pathname}${buildAlbumHash(secret, it.ref || '')}`;
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (_) { /* fall through */ }
+    }
+    // Fallback for browsers without the async clipboard API (or when it is denied)
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+
+  function resetCopyButton() {
+    const btn = document.getElementById('lightbox-copy');
+    if (__copyResetTimer) clearTimeout(__copyResetTimer);
+    __copyResetTimer = null;
+    if (!btn) return;
+    btn.textContent = 'Copy link';
+    btn.removeAttribute('data-copied');
+  }
+
+  async function copyPhotoLink(e) {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const btn = document.getElementById('lightbox-copy');
+    const link = currentPhotoLink();
+    if (!btn || !link) return;
+    const ok = await copyText(link);
+    btn.textContent = ok ? 'Copied' : 'Copy failed';
+    if (ok) btn.setAttribute('data-copied', '1');
+    if (__copyResetTimer) clearTimeout(__copyResetTimer);
+    __copyResetTimer = setTimeout(resetCopyButton, 1800);
+  }
+
+  /** Index of the item whose ref equals `photoRef` (or, for a shorter ref, uniquely starts with it). */
+  function findLightboxIndexByRef(items, photoRef) {
+    const want = String(photoRef || '').toLowerCase();
+    if (!want) return -1;
+    const exact = items.findIndex((it) => it.ref === want);
+    if (exact >= 0) return exact;
+    if (want.length < 8) return -1;
+    const matches = [];
+    items.forEach((it, i) => { if (it.ref && it.ref.startsWith(want)) matches.push(i); });
+    return matches.length === 1 ? matches[0] : -1;
+  }
+
+  // ---------------------------------------------------------------------------
   // Lightbox: buttons + keyboard (Esc, arrows) + horizontal swipe, counter, file name,
-  // download link, neighbours preloaded. `items` = [{ name, fullSrc }].
+  // download link, "Copy link" button, neighbours preloaded. `items` = [{ name, ref, fullSrc }].
+  // While open, the URL fragment mirrors the current photo ("#<secret>/<ref>") so visitors can
+  // share a direct link. Opening pushes one history entry (state { ohmyphotoLightbox: 1 }) so the
+  // browser's Back button closes the viewer; moving between photos only replaces that entry.
   // ---------------------------------------------------------------------------
   let __lightboxIndex = -1;
   let __lightboxItems = [];
   let __lightboxReturnFocus = null;
+  let __lightboxClosing = false; // history.back() issued, waiting for popstate
+  let __copyResetTimer = null;
   const __preloaded = new Set();
+  const LIGHTBOX_STATE = { ohmyphotoLightbox: 1 };
+  const isLightboxState = (st) => Boolean(st && typeof st === 'object' && st.ohmyphotoLightbox === 1);
 
   const lbEl = () => document.getElementById('lightbox');
   const displayName = (name) => String(name || '').replace(/\.jpe?g$/i, '');
@@ -63,6 +173,8 @@ import { createZipWriter } from './zip.js';
       dl.setAttribute('download', it.name || 'photo.jpg');
       dl.setAttribute('aria-label', `Download ${it.name || 'photo'}`);
     }
+    setPhotoHash(it.ref || '');
+    resetCopyButton();
     const n = __lightboxItems.length;
     if (n > 1) {
       preloadImage((i + 1) % n);
@@ -70,13 +182,22 @@ import { createZipWriter } from './zip.js';
     }
   }
 
-  function openLightboxByIndex(idx) {
+  /**
+   * Open the viewer on item `idx`. By default one history entry is pushed (so Back closes it);
+   * pass `{ pushHistory: false }` when the entry already exists (Forward after Back).
+   */
+  function openLightboxByIndex(idx, { pushHistory = true } = {}) {
     if (!Array.isArray(__lightboxItems) || __lightboxItems.length === 0) return;
     const i = Number(idx);
     if (!Number.isFinite(i) || i < 0 || i >= __lightboxItems.length) return;
     const lb = lbEl();
     if (!lb) return;
+    __lightboxClosing = false;
     __lightboxReturnFocus = document.activeElement;
+    if (pushHistory && !isLightboxState(history.state)) {
+      const it = __lightboxItems[i];
+      pushPhotoHash((it && it.ref) || '');
+    }
     showLightboxIndex(i);
     lb.style.display = 'block';
     document.body.style.overflow = 'hidden';
@@ -84,11 +205,26 @@ import { createZipWriter } from './zip.js';
     if (closeBtn) closeBtn.focus({ preventScroll: true });
   }
 
+  /** Close from a user action: pop our history entry if there is one, popstate then hides the viewer. */
   function closeLightbox() {
+    if (__lightboxClosing) return;
+    if (isLightboxOpen() && isLightboxState(history.state)) {
+      __lightboxClosing = true;
+      history.back();
+      return;
+    }
+    hideLightbox();
+  }
+
+  /** Actually hide the viewer (no history manipulation beyond restoring "#<secret>" in place). */
+  function hideLightbox() {
+    __lightboxClosing = false;
     const lb = lbEl();
     if (lb) lb.style.display = 'none';
     document.body.style.overflow = 'auto';
     __lightboxIndex = -1;
+    resetCopyButton();
+    setPhotoHash('');
     const img = document.getElementById('lightbox-img');
     if (img) img.src = '';
     const f = __lightboxReturnFocus;
@@ -124,6 +260,20 @@ import { createZipWriter } from './zip.js';
     if (closeBtn) closeBtn.onclick = (e) => { e.stopPropagation(); closeLightbox(); };
     if (prevBtn) prevBtn.onclick = previousImage;
     if (nextBtn) nextBtn.onclick = nextImage;
+    const copyBtn = document.getElementById('lightbox-copy');
+    if (copyBtn) copyBtn.onclick = copyPhotoLink;
+    // Back closes the viewer (our pushed entry is popped); Forward re-opens it on the photo in the hash.
+    window.addEventListener('popstate', (e) => {
+      const inViewer = isLightboxState(e.state);
+      if (isLightboxOpen() && !inViewer) {
+        hideLightbox();
+      } else if (!isLightboxOpen() && inViewer) {
+        const { photoRef } = parseAlbumHash(location.hash);
+        const idx = findLightboxIndexByRef(__lightboxItems, photoRef);
+        if (idx >= 0) openLightboxByIndex(idx, { pushHistory: false });
+        else history.back();
+      }
+    });
     // close when clicking the backdrop or the empty area around the image (not the image/controls)
     lb.addEventListener('click', (e) => {
       const t = e.target;
@@ -322,9 +472,9 @@ import { createZipWriter } from './zip.js';
 
   async function main() {
     const albumId = getAlbumIdFromPath();
-    const secret = (location.hash || '').replace(/^#/, '');
+    const { secret, photoRef } = parseAlbumHash(location.hash);
 
-    __ompLog('main() start', { albumId, hasSecret: Boolean(secret) });
+    __ompLog('main() start', { albumId, hasSecret: Boolean(secret), hasPhotoRef: Boolean(photoRef) });
 
     const logoLinkEl = document.getElementById('logoLink');
     const titleEl = document.getElementById('title');
@@ -373,10 +523,9 @@ import { createZipWriter } from './zip.js';
       // If we're staying on the same album path and only changing the hash,
       // the browser won't reload the document. We need a reload to retry with the new secret.
       if (location.pathname === safePath) {
-        const cur = normalizeSecret((location.hash || '').replace(/^#/, ''));
+        const cur = normalizeSecret(parseAlbumHash(location.hash).secret);
         if (cur === sec) return;
-        if (sec) location.hash = `#${sec}`;
-        else location.hash = '';
+        location.hash = buildAlbumHash(sec, '');
         location.reload();
         return;
       }
@@ -533,9 +682,9 @@ import { createZipWriter } from './zip.js';
       };
     };
 
-    // Link to the current page including secret (hash), so user can copy/share it.
+    // Link to the album including the secret (hash) but without a photo ref, so user can copy/share it.
     if (logoLinkEl) {
-      const selfHref = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+      const selfHref = `${location.pathname}${location.search || ''}${buildAlbumHash(secret, '')}`;
       logoLinkEl.setAttribute('href', selfHref || '#');
     }
 
@@ -769,6 +918,7 @@ import { createZipWriter } from './zip.js';
 
     __lightboxItems = files.map((f) => ({
       name: String(f.name || ''),
+      ref: String(f.ref || '').toLowerCase(),
       fullSrc: String(f.photoUrl || '')
     }));
 
@@ -804,6 +954,21 @@ import { createZipWriter } from './zip.js';
 
       item.appendChild(img);
       gridEl.appendChild(item);
+    }
+
+    // Deep link: "#<secret>/<ref>" opens that photo right away. A ref that is no longer in the
+    // album (removed, or the link was for another album) falls back to the grid with a note.
+    if (photoRef) {
+      const idx = findLightboxIndexByRef(__lightboxItems, photoRef);
+      __ompLog('deep link photo', { photoRef, index: idx });
+      if (idx >= 0) {
+        // Turn the single deep-link entry into [album, photo] so the first Back shows the album.
+        setPhotoHash('');
+        openLightboxByIndex(idx);
+      } else {
+        setPhotoHash('');
+        if (files.length) setStatusText('The photo from your link is no longer in this album. Here is the whole album.');
+      }
     }
   }
 
