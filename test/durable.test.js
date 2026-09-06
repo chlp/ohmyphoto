@@ -100,4 +100,38 @@ describe("AlbumInfoDO", () => {
     const r = await callDO(env.ALBUM_INFO, "album:bad", { action: "get", albumId: "a/b" });
     expect(r.status).toBe(400);
   });
+
+  it("counts views per secret, survives invalidate, merges and resets", async () => {
+    const call = (body) => callDO(env.ALBUM_INFO, `album:${albumId}`, body);
+    await env.BUCKET.put(`albums/${albumId}/info.json`, JSON.stringify({ title: "T", secrets: { s1: {}, s2: {} }, files: [] }));
+
+    expect((await call({ action: "stats" })).data.stats).toEqual({ since: null, lastAt: null, total: 0, bySecret: {} });
+    const withStats = (await call({ action: "get", albumId, withStats: true })).data;
+    expect(withStats.stats).toEqual({ since: null, lastAt: null, total: 0 });
+    expect((await get()).data.stats).toBeUndefined();
+
+    const t0 = Date.now();
+    await call({ action: "hit", secret: "s1" });
+    await call({ action: "hit", secret: "s1" });
+    await call({ action: "hit", secret: "s2" });
+    const st = (await call({ action: "stats" })).data.stats;
+    expect(st.total).toBe(3);
+    expect(st.bySecret).toEqual({ s1: 2, s2: 1 });
+    expect(st.since).toBeGreaterThanOrEqual(t0);
+    expect(st.lastAt).toBeGreaterThanOrEqual(st.since);
+
+    // cache invalidation must not touch the counters
+    await invalidate();
+    expect((await call({ action: "stats" })).data.stats.total).toBe(3);
+    expect((await get()).data.cached).toBe(false);
+
+    // merge (rename) keeps the earliest start and sums per secret
+    await call({ action: "importStats", stats: { since: t0 - 1000, lastAt: t0, total: 5, bySecret: { s2: 4, old: 1 } } });
+    const merged = (await call({ action: "stats" })).data.stats;
+    expect(merged).toMatchObject({ since: t0 - 1000, total: 8, bySecret: { s1: 2, s2: 5, old: 1 } });
+    expect(merged.lastAt).toBe(st.lastAt);
+
+    await call({ action: "resetStats" });
+    expect((await call({ action: "stats" })).data.stats).toEqual({ since: null, lastAt: null, total: 0, bySecret: {} });
+  });
 });

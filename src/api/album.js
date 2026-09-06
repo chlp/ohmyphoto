@@ -1,4 +1,4 @@
-import { checkAlbumSecret } from '../utils/album.js';
+import { checkAlbumSecret, recordAlbumView } from '../utils/album.js';
 import { json } from '../utils/response.js';
 import { requireTurnstileOr403, verifyTurnstileRequest } from '../utils/turnstile.js';
 import { imageSig } from '../utils/crypto.js';
@@ -217,6 +217,12 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   }
   const info = checkResult.info;
   const matchedSecret = checkResult.matchedSecret;
+
+  // View statistics (admin only): one hit per successful open, per link. Never blocks the response.
+  {
+    const work = recordAlbumView(env, albumId, matchedSecret).catch(() => null);
+    if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(work);
+  }
 
   // NO LISTING: photo list must be provided in info.json (managed via admin).
   // Entries are { name, ref }; ref addresses the shared photos/<ref>.jpg object.

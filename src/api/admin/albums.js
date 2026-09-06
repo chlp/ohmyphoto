@@ -1,5 +1,5 @@
 import { jsonNoStore, badRequest, conflict, notFound } from '../../utils/response.js';
-import { getAlbumInfoWithSecrets, invalidateAlbumCache } from '../../utils/album.js';
+import { getAlbumInfoWithSecrets, getAlbumStats, invalidateAlbumCache, moveAlbumStats, resetAlbumStats } from '../../utils/album.js';
 import { isValidAlbumId, isValidAlbumSecret, isStrongAlbumSecret, MIN_ALBUM_SECRET_LENGTH } from '../../utils/validate.js';
 import { extractSecrets } from '../../utils/albumSecrets.js';
 import { readJson } from '../../utils/http.js';
@@ -31,14 +31,16 @@ export function generateAlbumSecret() {
 export async function handleListAlbums({ env, url }) {
   const { ids, cursor } = await listAlbumIds(env, { cursor: url.searchParams.get("cursor") || undefined });
   const loaded = await mapLimit(ids, 16, async (albumId) => {
-    const r = await getAlbumInfoWithSecrets(albumId, env);
+    // withStats rides on the same DO call, so the page stays at 1 list + PAGE_ALBUMS subrequests.
+    const r = await getAlbumInfoWithSecrets(albumId, env, { withStats: true });
     if (!r.ok) return null; // folder without a readable info.json
     return {
       albumId,
       title: String(r.info?.title || DEFAULT_TITLE),
       secretCount: r.secrets.length,
       secrets: r.secrets,
-      fileCount: getFileEntries(r.info).length
+      fileCount: getFileEntries(r.info).length,
+      views: r.stats || null
     };
   });
   return jsonNoStore({ albums: loaded.filter(Boolean), cursor, done: cursor === null });
@@ -121,7 +123,26 @@ export async function handleUpdateAlbum({ request, env, params: [albumId] }) {
   await putInfoJson(env, newAlbumId, next.info);
   await env.BUCKET.delete(infoKey(albumId));
   await invalidateAlbumCache(env, albumId);
+  await moveAlbumStats(env, albumId, newAlbumId);
   return jsonNoStore({ albumId: newAlbumId, title: next.result.title, renamedFrom: albumId });
+}
+
+/**
+ * GET /api/admin/album/<albumId>/stats
+ * View counters kept by AlbumInfoDO: { since, lastAt, total, bySecret }. `bySecret` may contain
+ * secrets that were since removed from the album; the UI shows them as "removed links".
+ */
+export async function handleAlbumStats({ env, params: [albumId] }) {
+  if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+  if (!(await albumExists(env, albumId))) return notFound();
+  return jsonNoStore({ albumId, ...(await getAlbumStats(env, albumId)) });
+}
+
+/** DELETE /api/admin/album/<albumId>/stats — start counting from zero (also clears `since`). */
+export async function handleResetAlbumStats({ env, params: [albumId] }) {
+  if (!isValidAlbumId(albumId)) return badRequest("Invalid albumId");
+  await resetAlbumStats(env, albumId);
+  return jsonNoStore({ albumId, reset: true });
 }
 
 /**

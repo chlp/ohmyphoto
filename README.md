@@ -64,6 +64,10 @@ The album API response carries the verdict in `zip: { available, reason, fileCou
 
 Per-IP limits use Cloudflare's native Rate Limiting bindings (`[[ratelimits]]` in `wrangler.toml`) for the album, image and admin APIs, and a Durable Object for the admin login endpoint (10 attempts / 10 minutes). Set `RATE_LIMIT_DISABLED=1` to turn it off locally.
 
+## View statistics
+
+The admin UI shows how often each album was opened: a total per album in the list, and on the album page a count per share link plus the date the counter started and the last visit. One view is one successful album open (valid link); wrong secrets and unknown albums are not counted, and nothing about the visitor (IP, user agent) is stored. Counters live in the album's Durable Object next to the `info.json` cache, survive cache invalidation and follow the album when it is renamed. Set `ALBUM_VIEWS=0` to turn counting off; "Reset views" starts a counter from zero.
+
 ## Gallery for visitors
 
 - Grid of previews; the lightbox has close/prev/next buttons, keyboard navigation (Esc, arrows, Home/End), swipe on touch screens, a `1 / 42` counter, the file name and a **Download** link that saves the original under its album name.

@@ -268,6 +268,7 @@
               <tr>
                 <th>Album</th>
                 <th class="num">Photos</th>
+                <th class="num" title="Album opens with a valid link since the counter started">Views</th>
                 <th class="opt">Secrets</th>
                 <th>Share</th>
                 <th></th>
@@ -337,6 +338,10 @@
           <span class="muted small">One link per secret. Open the link or download the QR code.</span>
         </div>
         <div class="albumLinks" id="albumLinks"></div>
+        <div class="row" style="margin-top:10px;">
+          <span class="muted small" id="albumViews" title="Album opens with a valid link (page loads, not unique visitors)"></span>
+          <button class="ghost sm" id="resetViewsBtn" type="button" title="Start counting from zero">Reset views</button>
+        </div>
       </div>
 
       <div class="card" id="photosCard">
@@ -983,6 +988,14 @@
           b.textContent = 'weak';
           wrap.appendChild(b);
         }
+        if (opts.views) {
+          const n = opts.views[sec] || 0;
+          const v = document.createElement('span');
+          v.className = 'badge';
+          v.title = 'Opens with this link';
+          v.textContent = `${n} view${n === 1 ? '' : 's'}`;
+          wrap.appendChild(v);
+        }
 
         containerEl.appendChild(wrap);
       }
@@ -1082,7 +1095,7 @@
       if (!albums.length) {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 5;
+        td.colSpan = 6;
         td.className = 'empty';
         td.innerHTML = 'No albums yet. <a href="#/new">Create the first one</a>.';
         tr.appendChild(td);
@@ -1115,6 +1128,13 @@
         tdCount.className = 'num';
         tdCount.textContent = String(a.fileCount || 0);
         tr.appendChild(tdCount);
+
+        const tdViews = document.createElement('td');
+        tdViews.className = 'num';
+        const v = a.views;
+        tdViews.textContent = v ? String(v.total || 0) : '–';
+        tdViews.title = v && v.since ? `since ${fmtDate(v.since)}, last ${fmtDate(v.lastAt)}` : (v ? 'No views yet' : 'Statistics unavailable');
+        tr.appendChild(tdViews);
 
         const tdSecrets = document.createElement('td');
         tdSecrets.className = 'opt';
@@ -1155,6 +1175,52 @@
     const editSecretsHintEl = $('editSecretsHint');
     const editRenameEl = $('editRename');
     let editOriginalSecrets = [];
+    let currentStats = null; // { since, lastAt, total, bySecret } of currentEditAlbumId
+
+    function fmtDate(ms) {
+      return ms ? new Date(ms).toLocaleString() : '';
+    }
+
+    function renderAlbumViews() {
+      const el = $('albumViews');
+      const btn = $('resetViewsBtn');
+      if (!el) return;
+      const st = currentStats;
+      if (!st) { el.textContent = ''; btn.hidden = true; return; }
+      const current = new Set(parseSecrets(editSecretsEl.value));
+      let removed = 0;
+      for (const [sec, n] of Object.entries(st.bySecret || {})) if (!current.has(sec)) removed += n;
+      let text = `${st.total} view${st.total === 1 ? '' : 's'}`;
+      text += st.since ? ` since ${fmtDate(st.since)}, last ${fmtDate(st.lastAt)}.` : ' so far. Counting starts with the first visit.';
+      if (removed) text += ` ${removed} of them via links that were removed since.`;
+      el.textContent = text;
+      btn.hidden = !st.total;
+    }
+
+    async function loadAlbumStats(id) {
+      if (!id) return;
+      try {
+        const r = await api(`/api/admin/album/${encodeURIComponent(id)}/stats`, { method: 'GET' });
+        if (!r.ok || id !== currentEditAlbumId) return;
+        currentStats = await r.json();
+        const cached = lastAlbums.find((a) => a.albumId === id);
+        if (cached) cached.views = { since: currentStats.since, lastAt: currentStats.lastAt, total: currentStats.total };
+      } catch (e) {
+        console.warn('stats failed', e);
+        return;
+      }
+      updateEditSecretsHint();
+    }
+
+    async function resetAlbumViews() {
+      if (!currentEditAlbumId) return;
+      const id = currentEditAlbumId;
+      if (!confirm(`Reset the view counters of "${id}" to zero? The start date is reset too.`)) return;
+      const r = await api(`/api/admin/album/${encodeURIComponent(id)}/stats`, { method: 'DELETE' });
+      if (!r.ok) return notify(`Reset failed: ${r.status}`, 'error');
+      notify('View counters reset', 'ok');
+      await loadAlbumStats(id);
+    }
 
     function updateEditSecretsHint() {
       const list = parseSecrets(editSecretsEl.value);
@@ -1166,7 +1232,12 @@
       if (bad) text += `. ${bad} invalid (allowed: a-z A-Z 0-9 _ -).`;
       editSecretsHintEl.textContent = text;
       editSecretsHintEl.className = 'hint' + (weak || bad || !list.length ? ' bad' : '');
-      renderAlbumLinks($('albumLinks'), currentEditAlbumId, list, { copy: true, emptyText: 'Add a secret in Settings below and save to get a share link.' });
+      renderAlbumLinks($('albumLinks'), currentEditAlbumId, list, {
+        copy: true,
+        emptyText: 'Add a secret in Settings below and save to get a share link.',
+        views: currentStats ? currentStats.bySecret || {} : null
+      });
+      renderAlbumViews();
     }
     editSecretsEl.addEventListener('input', updateEditSecretsHint);
     $('addSecretBtn').onclick = () => {
@@ -1202,8 +1273,10 @@
       editSecretsEl.value = (album.secrets || []).join('\n');
       editRenameEl.value = '';
       $('saveStatus').textContent = '';
-      updateEditSecretsHint();
       fillSrcAlbumSelect();
+      if (changed) currentStats = null;
+      updateEditSecretsHint();
+      loadAlbumStats(id).catch(() => {});
       if (changed) {
         filesGridEl.innerHTML = '';
         uploadStatusEl.textContent = '';
@@ -1885,7 +1958,8 @@
     $('refreshBtn').onclick = refresh;
     $('trashRefreshBtn').onclick = () => refreshTrash().catch((e) => { $('trashStatus').textContent = errText(e); });
     $('verifyAllFilesBtn').onclick = () => verifyAllFiles().catch((e) => notify(errText(e), 'error'));
-    $('refreshFilesBtn').onclick = () => refreshFiles().catch((e) => notify(errText(e), 'error'));
+    $('refreshFilesBtn').onclick = () => Promise.all([refreshFiles(), loadAlbumStats(currentEditAlbumId)]).catch((e) => notify(errText(e), 'error'));
+    $('resetViewsBtn').onclick = () => resetAlbumViews().catch((e) => notify(errText(e), 'error'));
     $('verifyFilesBtn').onclick = () => verifyFiles().catch(() => {});
     $('gcBtn').onclick = () => gcOrphans().catch(() => {});
     $('srcDetails').addEventListener('toggle', () => { if ($('srcDetails').open) fillSrcAlbumSelect(); });

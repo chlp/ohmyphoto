@@ -123,7 +123,7 @@ describe("album lifecycle", () => {
     expect((await api("/album", jsonInit("POST", { albumId: "bad-secret", secret: "has space 0123456789" }))).status).toBe(400);
 
     const list = await (await api("/albums")).json();
-    expect(list).toEqual({ albums: [{ albumId, title: "Lake", secretCount: 1, secrets: [secret], fileCount: 0 }], cursor: null, done: true });
+    expect(list).toEqual({ albums: [{ albumId, title: "Lake", secretCount: 1, secrets: [secret], fileCount: 0, views: { since: null, lastAt: null, total: 0 } }], cursor: null, done: true });
 
     // upload: ref is sha256 of the photo bytes when the client does not provide one
     const up1 = await api(`/album/${albumId}/file`, uploadForm("b.jpg", JPEG2));
@@ -246,6 +246,63 @@ describe("album lifecycle", () => {
     expect((await api(`/trash/${encodeURIComponent(del2.trashKey)}`, { method: "DELETE" })).status).toBe(404);
     expect(await env.BUCKET.head(del2.trashKey)).toBeNull();
     await api(`/album/${albumId}`, { method: "DELETE" });
+  });
+
+  it("counts album views per link, moves them on rename and resets", async () => {
+    const api = admin(await login());
+    const albumId = `2025.05.05-views-${crypto.randomUUID().slice(0, 8)}`;
+    const renamed = `${albumId}-renamed`;
+    await api("/album", jsonInit("POST", { albumId, secret: SA }));
+    await api(`/album/${albumId}`, jsonInit("PUT", { secrets: [SA, SB] }));
+
+    const fresh = await (await api(`/album/${albumId}/stats`)).json();
+    expect(fresh).toEqual({ albumId, since: null, lastAt: null, total: 0, bySecret: {} });
+    expect((await api(`/album/${albumId}-missing/stats`)).status).toBe(404);
+
+    // Only successful opens count: wrong secret and unknown album do not move the counters.
+    expect((await gallery(albumId, "wrong-secret-0123456789")).status).toBe(403);
+    expect((await gallery(`${albumId}-missing`, SA)).status).toBe(404);
+    expect((await gallery(albumId, SA)).status).toBe(200);
+    expect((await gallery(albumId, SA)).status).toBe(200);
+    expect((await gallery(albumId, SB)).status).toBe(200);
+
+    // The hit is recorded in ctx.waitUntil; give it a moment.
+    const waitForTotal = async (id, total) => {
+      for (let i = 0; i < 20; i++) {
+        const st = await (await api(`/album/${id}/stats`)).json();
+        if (st.total === total) return st;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      return (await api(`/album/${id}/stats`)).json();
+    };
+    const st = await waitForTotal(albumId, 3);
+    expect(st.total).toBe(3);
+    expect(st.bySecret).toEqual({ [SA]: 2, [SB]: 1 });
+    expect(st.since).toBeGreaterThan(0);
+    expect(st.lastAt).toBeGreaterThanOrEqual(st.since);
+
+    // the list carries the summary from the same DO round-trip
+    let listed = null;
+    for (let cursor = null, done = false; !done;) {
+      const page = await (await api(`/albums${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`)).json();
+      listed = listed || page.albums.find((a) => a.albumId === albumId);
+      cursor = page.cursor;
+      done = page.done;
+    }
+    expect(listed.views).toEqual({ since: st.since, lastAt: st.lastAt, total: 3 });
+
+    // rename moves the counters to the new id
+    expect((await api(`/album/${albumId}`, jsonInit("PUT", { newAlbumId: renamed }))).status).toBe(200);
+    const moved = await (await api(`/album/${renamed}/stats`)).json();
+    expect(moved).toMatchObject({ total: 3, since: st.since, bySecret: { [SA]: 2, [SB]: 1 } });
+    // the old id is gone (404 for stats), and a re-created album under it starts from zero
+    expect((await api(`/album/${albumId}/stats`)).status).toBe(404);
+    await api("/album", jsonInit("POST", { albumId, secret: SC }));
+    expect((await (await api(`/album/${albumId}/stats`)).json()).total).toBe(0);
+
+    // reset
+    expect((await api(`/album/${renamed}/stats`, { method: "DELETE" })).status).toBe(200);
+    expect(await (await api(`/album/${renamed}/stats`)).json()).toEqual({ albumId: renamed, since: null, lastAt: null, total: 0, bySecret: {} });
   });
 
   it("de-duplicates uploads and attaches existing photos to another album", async () => {

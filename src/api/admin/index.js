@@ -1,7 +1,7 @@
 import { notFound } from '../../utils/response.js';
 import { authorizeAdmin, handleSession } from './auth.js';
 import { handleGenerateAlbumId } from './ai.js';
-import { handleCreateAlbum, handleDeleteAlbum, handleListAlbums, handleUpdateAlbum } from './albums.js';
+import { handleAlbumStats, handleCreateAlbum, handleDeleteAlbum, handleResetAlbumStats, handleListAlbums, handleUpdateAlbum } from './albums.js';
 import {
   handleAttachFiles,
   handleDeleteFile,
@@ -37,6 +37,8 @@ const ROUTES = [
   { method: "PUT", pattern: /^\/api\/admin\/album\/([^/]+)$/, handler: handleUpdateAlbum },
   { method: "DELETE", pattern: /^\/api\/admin\/album\/([^/]+)$/, handler: handleDeleteAlbum },
 
+  { method: "GET", pattern: /^\/api\/admin\/album\/([^/]+)\/stats$/, handler: handleAlbumStats },
+  { method: "DELETE", pattern: /^\/api\/admin\/album\/([^/]+)\/stats$/, handler: handleResetAlbumStats },
   { method: "POST", pattern: /^\/api\/admin\/album\/([^/]+)\/verify-files$/, handler: handleVerifyFiles },
   { method: "GET", pattern: /^\/api\/admin\/album\/([^/]+)\/files$/, handler: handleListFiles },
   { method: "POST", pattern: /^\/api\/admin\/album\/([^/]+)\/files$/, handler: handleAttachFiles },
