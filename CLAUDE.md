@@ -19,7 +19,7 @@ npm test
 npm run test:watch
 ```
 
-`npm install` first. No lint config. Related docs: `README.md` (feature overview), `USAGE.md` (Russian end-user guide for the admin UI).
+`npm install` first. No lint config. Related docs: `README.md` (feature overview), `USAGE.md` (Russian end-user guide for the admin UI), `IDEAS.md` (backlog of ideas and future features, in Russian; add new wishes there, move finished ones to "Сделано").
 
 **Tests** live in `test/*.test.js`; config in `vitest.config.mjs`. CI runs them on every push/PR (`.github/workflows/test.yml`). They run against the real `wrangler.toml` bindings with local R2/DO/rate-limit simulators, `remoteBindings: false` (Workers AI is never called), `TURNSTILE_SECRET_KEY` blanked, `RATE_LIMIT_DISABLED=1` (the e2e suite exceeds the 60/min admin limit; limiter logic is covered in `durable.test.js`) and `PHOTO_GC_GRACE_MS=0`. `test/worker.test.js` drives the full Worker via `SELF.fetch()`; add an end-to-end case there for any new admin route. R2 state is shared between tests in a file and shared photos are keyed by content hash, so each test gets unique JPEG bytes (`beforeEach`) and unique album IDs. `test/zip.test.js` imports the client ZIP writer (`public/zip.js`) directly; `test/infoStore.test.js` covers the ETag-conditional `info.json` update.
 
