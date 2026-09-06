@@ -269,7 +269,6 @@
                 <th>Album</th>
                 <th class="num">Photos</th>
                 <th class="num" title="Album opens with a valid link since the counter started">Views</th>
-                <th class="opt">Secrets</th>
                 <th>Share</th>
                 <th></th>
               </tr>
@@ -903,6 +902,12 @@
         uniq.push(v);
       }
       if (uniq.length === 0) {
+        if (opts.noSecretsBadge) {
+          const b = document.createElement('span');
+          b.className = 'badge bad';
+          b.textContent = 'no secrets';
+          containerEl.appendChild(b);
+        }
         if (opts.emptyText) {
           const e = document.createElement('span');
           e.className = 'muted small';
@@ -981,7 +986,7 @@
         });
         wrap.appendChild(d);
 
-        if (opts.copy && isWeakSecret(sec)) {
+        if (isWeakSecret(sec)) {
           const b = document.createElement('span');
           b.className = 'badge warn';
           b.title = `Shorter than ${MIN_SECRET_LENGTH} characters`;
@@ -1095,7 +1100,7 @@
       if (!albums.length) {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 6;
+        td.colSpan = 5;
         td.className = 'empty';
         td.innerHTML = 'No albums yet. <a href="#/new">Create the first one</a>.';
         tr.appendChild(td);
@@ -1136,21 +1141,11 @@
         tdViews.title = v && v.since ? `since ${fmtDate(v.since)}, last ${fmtDate(v.lastAt)}` : (v ? 'No views yet' : 'Statistics unavailable');
         tr.appendChild(tdViews);
 
-        const tdSecrets = document.createElement('td');
-        tdSecrets.className = 'opt';
-        const secrets = a.secrets || [];
-        const weak = secrets.filter(isWeakSecret).length;
-        const badge = document.createElement('span');
-        badge.className = 'badge' + (!secrets.length ? ' bad' : weak ? ' warn' : '');
-        badge.textContent = !secrets.length ? 'no secrets' : `${secrets.length}${weak ? `, ${weak} weak` : ''}`;
-        badge.title = weak ? `${weak} secret(s) shorter than ${MIN_SECRET_LENGTH} chars` : '';
-        tdSecrets.appendChild(badge);
-        tr.appendChild(tdSecrets);
-
         const tdLinks = document.createElement('td');
         const links = document.createElement('div');
         links.className = 'albumLinks';
-        renderAlbumLinks(links, a.albumId, secrets);
+        // Per-link weak badge and view count; "no secrets" replaces the former Secrets column.
+        renderAlbumLinks(links, a.albumId, a.secrets || [], { views: v ? v.bySecret || {} : null, noSecretsBadge: true });
         tdLinks.appendChild(links);
         tr.appendChild(tdLinks);
 

@@ -123,7 +123,7 @@ describe("album lifecycle", () => {
     expect((await api("/album", jsonInit("POST", { albumId: "bad-secret", secret: "has space 0123456789" }))).status).toBe(400);
 
     const list = await (await api("/albums")).json();
-    expect(list).toEqual({ albums: [{ albumId, title: "Lake", secretCount: 1, secrets: [secret], fileCount: 0, views: { since: null, lastAt: null, total: 0 } }], cursor: null, done: true });
+    expect(list).toEqual({ albums: [{ albumId, title: "Lake", secretCount: 1, secrets: [secret], fileCount: 0, views: { since: null, lastAt: null, total: 0, bySecret: {} } }], cursor: null, done: true });
 
     // upload: ref is sha256 of the photo bytes when the client does not provide one
     const up1 = await api(`/album/${albumId}/file`, uploadForm("b.jpg", JPEG2));
@@ -289,7 +289,7 @@ describe("album lifecycle", () => {
       cursor = page.cursor;
       done = page.done;
     }
-    expect(listed.views).toEqual({ since: st.since, lastAt: st.lastAt, total: 3 });
+    expect(listed.views).toEqual({ since: st.since, lastAt: st.lastAt, total: 3, bySecret: { [SA]: 2, [SB]: 1 } });
 
     // rename moves the counters to the new id
     expect((await api(`/album/${albumId}`, jsonInit("PUT", { newAlbumId: renamed }))).status).toBe(200);

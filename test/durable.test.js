@@ -107,7 +107,7 @@ describe("AlbumInfoDO", () => {
 
     expect((await call({ action: "stats" })).data.stats).toEqual({ since: null, lastAt: null, total: 0, bySecret: {} });
     const withStats = (await call({ action: "get", albumId, withStats: true })).data;
-    expect(withStats.stats).toEqual({ since: null, lastAt: null, total: 0 });
+    expect(withStats.stats).toEqual({ since: null, lastAt: null, total: 0, bySecret: {} });
     expect((await get()).data.stats).toBeUndefined();
 
     const t0 = Date.now();

@@ -73,7 +73,7 @@ export async function invalidateAlbumCache(env, albumId) {
  * Load album info.json and extract all secrets.
  * @param {string} albumId
  * @param {Object} env
- * @param {{ withStats?: boolean }} [opts] withStats: also return the view summary { since, lastAt, total }
+ * @param {{ withStats?: boolean }} [opts] withStats: also return the view stats { since, lastAt, total, bySecret }
  *   from the same Durable Object round-trip (admin list); null when the DO is not available.
  * @returns {Promise<{ok: true, info: any, secrets: string[], stats?: object|null} | {ok: false, status: 404|500}>}
  */

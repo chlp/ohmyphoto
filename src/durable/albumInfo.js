@@ -9,7 +9,7 @@ import { extractSecrets } from '../utils/albumSecrets.js';
  *
  * Protocol (POST):
  * - { action: "get", albumId, ttlMs?, withStats? } -> { ok: true, albumId, info, secrets, cached, fetchedAtMs, stats? }
- *   (`stats` = the summary below without `bySecret`, only when `withStats` is true)
+ *   (`stats` = the same object `stats` returns, only when `withStats` is true)
  * - { action: "invalidate" } -> { ok: true }   (cache only; view stats are kept)
  *
  * View statistics live next to the cache under a separate storage key, so invalidating the
@@ -89,11 +89,6 @@ export class AlbumInfoDO {
     await this.saveStats(stats);
   }
 
-  /** Public summary for lists: everything except the per-secret breakdown. */
-  async statsSummary() {
-    const { since, lastAt, total } = await this.loadStats();
-    return { since, lastAt, total };
-  }
 
   async load() {
     if (this.mem) return this.mem;
@@ -200,7 +195,7 @@ export class AlbumInfoDO {
   }
 
   async maybeStats(body) {
-    return body && body.withStats ? { stats: await this.statsSummary() } : {};
+    return body && body.withStats ? { stats: await this.loadStats() } : {};
   }
 }
 
