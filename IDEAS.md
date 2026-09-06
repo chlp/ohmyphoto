@@ -4,10 +4,6 @@
 
 ## Хочется
 
-### Аналитика: следующий шаг
-- История по дням и уникальные посетители: Workers Analytics Engine (`writeDataPoint` в `ctx.waitUntil`, запрос через SQL API, показывать в админке). Core Web Vitals: Cloudflare Web Analytics (бикон + CSP в `public/_headers`).
-- Считать скачивания ZIP (клиент дергает лёгкий `POST /api/album/<id>/event`? или отдельное действие в `AlbumInfoDO`).
-
 ## Сделано
 
 ### При загрузке фоток сразу выбирать, в какие ещё альбомы добавить (2026-09-06)
