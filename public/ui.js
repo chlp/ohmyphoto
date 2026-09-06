@@ -715,7 +715,10 @@ import { createZipWriter } from './zip.js';
     // Fast path: try without Turnstile. If server requires it, we'll get 403 and retry once.
     let resp = await fetchAlbumOnce('');
     if (resp.status === 403) {
+      // Tell the visitor why the wait is longer than usual instead of a silent "Loading...".
+      setStatusText('Checking that you are not a robot, this takes a few seconds...');
       const token = await getTurnstileTokenOnce();
+      setStatusText('Loading...');
       resp = await fetchAlbumOnce(token);
     }
 

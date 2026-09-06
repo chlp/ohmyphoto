@@ -104,6 +104,10 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   // Optimization: if browser already passed Turnstile recently, accept a short-lived signed cookie.
   let setBypassCookie = false;
   let bypassCookieHeader = null;
+  // Set in soft mode; called only when the secret check fails (403/404).
+  let penalizeIfSuspicious = null;
+  // Issues (or refreshes) the IP-bound bypass cookie; no-op when cookies are disabled.
+  let issueBypassCookie = async () => {};
   if (env.TURNSTILE_SECRET_KEY) {
     const __tTurnstile = __ompNowMs();
     const cookieEnabled = String(env.TURNSTILE_BYPASS_COOKIE || "1") !== "0";
@@ -111,34 +115,42 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
     const ttlMs = Number(env.TURNSTILE_BYPASS_COOKIE_TTL_MS) || 7 * 24 * 60 * 60 * 1000;
     const clientIp = getClientIp(request);
     const secure = new URL(request.url).protocol === "https:";
-
     if (cookieEnabled) {
+      issueBypassCookie = async () => {
+        const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, clientIp, ttlMs);
+        bypassCookieHeader = makeSetCookie({
+          name: cookieName,
+          value: issued.token,
+          maxAgeSec: Math.floor(ttlMs / 1000),
+          secure
+        });
+        setBypassCookie = true;
+      };
+
       const __tCookie = __ompNowMs();
       const cookieToken = getCookieValue(request.headers.get("Cookie"), cookieName);
       if (cookieToken) {
         const ok = await verifyHumanBypassToken(cookieToken, env.TURNSTILE_SECRET_KEY, clientIp);
         if (ok.ok) {
           // Sliding TTL: refresh cookie.
-          const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, clientIp, ttlMs);
-          bypassCookieHeader = makeSetCookie({
-            name: cookieName,
-            value: issued.token,
-            maxAgeSec: Math.floor(ttlMs / 1000),
-            secure
-          });
-          setBypassCookie = true;
+          await issueBypassCookie();
         }
       }
       __mark('turnstile_cookie', __tCookie);
     }
 
     // Soft Turnstile:
-    // - Until an IP sends > threshold requests without a valid bypass cookie and without passing Turnstile,
-    //   do NOT block the request and do NOT wait on Turnstile verification.
-    // - If a token is provided, verify in the background and mark the IP as "ok" for ttlMs.
-    // - Once the threshold is exceeded, require Turnstile (or cookie) synchronously.
+    // - Only *suspicious* requests count towards the per-IP soft counter: wrong secret (403) or
+    //   unknown album (404) without a Turnstile token / bypass cookie. A visitor opening a valid
+    //   link never moves the counter, so a shared NAT (office, mobile carrier) or the photographer
+    //   testing links does not push honest visitors into the captcha.
+    // - Until the IP exceeds the threshold the request is never blocked and never waits on
+    //   Turnstile verification.
+    // - Once the threshold is exceeded, Turnstile (or the cookie) is required synchronously.
+    // - A valid secret earns the bypass cookie right away (see below), so repeat visits from the
+    //   same browser skip even the counter peek.
     if (!setBypassCookie) {
-      const threshold = Number(env.TURNSTILE_SOFT_THRESHOLD) || 100;
+      const threshold = Number(env.TURNSTILE_SOFT_THRESHOLD) || 256;
       const windowMs = Number(env.TURNSTILE_SOFT_WINDOW_MS) || 24 * 60 * 60 * 1000;
       const __tPeek = __ompNowMs();
       const { count } = await peekTurnstileSoftCount(env, clientIp);
@@ -160,50 +172,30 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
         });
         __mark('turnstile_verify', __tVerify);
         if (err) return err;
-
-        // Success: do not touch the counter here.
-
-        if (cookieEnabled) {
-          const issued = await issueHumanBypassToken(env.TURNSTILE_SECRET_KEY, clientIp, ttlMs);
-          bypassCookieHeader = makeSetCookie({
-            name: cookieName,
-            value: issued.token,
-            maxAgeSec: Math.floor(ttlMs / 1000),
-            secure
-          });
-          setBypassCookie = true;
-        }
+        // Passed the challenge: trust this browser for the cookie TTL (the secret may still be wrong).
+        await issueBypassCookie();
       } else {
-        // Not enforced yet: allow request to proceed without waiting.
-        // Only mutate the counter when we *know* the request didn't pass Turnstile:
-        // - no token => increment immediately
-        // - token present => verify in background; increment only on failure/unverified
-        if (!turnstileToken) {
-          // Best-effort: never block the album response on Durable Object round-trips.
-          if (ctx && typeof ctx.waitUntil === 'function') {
-            ctx.waitUntil(adjustTurnstileSoftCounter(env, clientIp, +1, windowMs));
-          } else {
-            // No ctx.waitUntil in this environment: fire-and-forget.
-            adjustTurnstileSoftCounter(env, clientIp, +1, windowMs).catch(() => null);
-          }
-        } else if (ctx && typeof ctx.waitUntil === 'function') {
-          const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
-          ctx.waitUntil((async () => {
-            try {
-              const r = await verifyTurnstileRequest(request, turnstileToken, env.TURNSTILE_SECRET_KEY, turnstileTimeoutMs);
-              if (r && r.success) return;
-              await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
-            } catch {
-              // On errors/timeouts treat as unverified -> count it.
-              await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
+        // Not enforced yet: decide after the secret check whether this request counts.
+        // - valid secret => never counted (see penalizeIfSuspicious)
+        // - wrong secret / unknown album, no token => counted
+        // - wrong secret / unknown album, token present => verified in the background, counted only on failure
+        penalizeIfSuspicious = () => {
+          const work = (async () => {
+            if (turnstileToken) {
+              const turnstileTimeoutMs = Number(env.TURNSTILE_VERIFY_TIMEOUT_MS) || 5000;
+              try {
+                const r = await verifyTurnstileRequest(request, turnstileToken, env.TURNSTILE_SECRET_KEY, turnstileTimeoutMs);
+                if (r && r.success) return;
+              } catch {
+                // On errors/timeouts treat as unverified -> count it.
+              }
             }
-          })());
-        } else {
-          // No ctx.waitUntil in this environment: treat as unverified.
-          const __tAdjust = __ompNowMs();
-          await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
-          __mark('turnstile_soft_adjust', __tAdjust);
-        }
+            await adjustTurnstileSoftCounter(env, clientIp, +1, windowMs);
+          })();
+          // Best-effort: never block the album response on Durable Object round-trips.
+          if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(work);
+          else work.catch(() => null);
+        };
       }
     }
     __mark('turnstile_total', __tTurnstile);
@@ -213,7 +205,15 @@ export async function handleAlbumRequest(request, env, albumId, ctx) {
   const checkResult = await secretCheckPromise;
   __mark('album_secret', __tSecret);
   if (!checkResult.success) {
+    // Wrong secret / unknown album: count it. A broken info.json (500) is our problem, not the visitor's.
+    const st = checkResult.response.status;
+    if (penalizeIfSuspicious && (st === 403 || st === 404)) penalizeIfSuspicious();
     return checkResult.response;
+  }
+  // Valid secret under the soft threshold: trust this browser for the cookie TTL so repeat
+  // visits skip the counter peek and never hit the captcha.
+  if (!setBypassCookie && penalizeIfSuspicious) {
+    await issueBypassCookie();
   }
   const info = checkResult.info;
   const matchedSecret = checkResult.matchedSecret;
