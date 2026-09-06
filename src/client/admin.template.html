@@ -167,6 +167,7 @@
     .albumLinkItem { display: inline-flex; gap: 8px; align-items: flex-start; }
     .albumLinkItem > a { font-size: 13px; text-decoration: none; padding: 4px 0; }
     .albumLinkItem > a:hover { text-decoration: underline; }
+    .albumLinkItem > .linkSecret { font-size: 12px; padding: 4px 0; word-break: break-all; max-width: 320px; }
     .qrDetails { display: inline-block; }
     .qrDetails > summary { cursor: pointer; user-select: none; font-size: 12px; color: var(--muted); padding: 4px 0; list-style: none; }
     .qrDetails > summary::-webkit-details-marker { display: none; }
@@ -337,6 +338,17 @@
           <span class="muted small">One link per secret. Open the link or download the QR code.</span>
         </div>
         <div class="albumLinks" id="albumLinks"></div>
+        <div class="field" style="margin-top:14px;">
+          <label for="editSecrets">Secrets (one per line)</label>
+          <textarea id="editSecrets" class="mono" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"></textarea>
+          <div class="hint" id="editSecretsHint"></div>
+          <div class="row" style="margin-top:6px;">
+            <button class="ghost sm" id="addSecretBtn" type="button" title="Append a new random secret (save to apply)">+ generated secret</button>
+            <button class="primary sm" id="saveSecretsBtn" type="button">Save secrets</button>
+            <span class="status muted small" id="saveSecretsStatus" style="margin:0;"></span>
+            <span class="hint" style="margin:0;">To rotate: add a new one, save, share the new link, then remove the old.</span>
+          </div>
+        </div>
         <div class="row" style="margin-top:10px;">
           <span class="muted small" id="albumViews" title="Album opens with a valid link (page loads, not unique visitors)"></span>
           <button class="ghost sm" id="resetViewsBtn" type="button" title="Start counting from zero">Reset views</button>
@@ -394,15 +406,6 @@
         <div class="field">
           <label for="editTitle">Title</label>
           <input id="editTitle" placeholder="OhMyPhoto" />
-        </div>
-        <div class="field">
-          <label for="editSecrets">Secrets (one per line)</label>
-          <textarea id="editSecrets" class="mono" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"></textarea>
-          <div class="hint" id="editSecretsHint"></div>
-          <div class="row" style="margin-top:6px;">
-            <button class="ghost sm" id="addSecretBtn" type="button" title="Append a new random secret (save to apply)">+ generated secret</button>
-            <span class="hint" style="margin:0;">To rotate: add a new one, share the new link, then remove the old.</span>
-          </div>
         </div>
         <div class="field">
           <label for="editRename">Rename album ID (optional)</label>
@@ -885,7 +888,7 @@
 
     /**
      * Renders one "open" link (+ lazy QR with PNG/SVG download) per secret.
-     * opts.copy adds a "copy link" button and shows the full URL (album page).
+     * opts.copy adds a "copy link" button (album page); opts.showSecret prints the full secret in front of the link.
      */
     function renderAlbumLinks(containerEl, albumId, secrets, opts = {}) {
       if (!containerEl) return;
@@ -926,11 +929,19 @@
         const path = `/${encodeURIComponent(id)}#${sec}`;
         const fullUrl = `${location.origin}${path}`;
 
+        if (opts.showSecret) {
+          const c = document.createElement('code');
+          c.className = 'linkSecret';
+          c.textContent = sec;
+          c.title = 'Secret: the part of the link after #';
+          wrap.appendChild(c);
+        }
+
         const a = document.createElement('a');
         a.href = path;
         a.target = '_blank';
         a.rel = 'noreferrer';
-        a.textContent = uniq.length === 1 ? 'open' : `open ${i + 1}`;
+        a.textContent = opts.showSecret || uniq.length === 1 ? 'open' : `open ${i + 1}`;
         a.title = fullUrl;
         wrap.appendChild(a);
 
@@ -1229,7 +1240,8 @@
       editSecretsHintEl.className = 'hint' + (weak || bad || !list.length ? ' bad' : '');
       renderAlbumLinks($('albumLinks'), currentEditAlbumId, list, {
         copy: true,
-        emptyText: 'Add a secret in Settings below and save to get a share link.',
+        showSecret: true,
+        emptyText: 'Add a secret below and save to get a share link.',
         views: currentStats ? currentStats.bySecret || {} : null
       });
       renderAlbumViews();
@@ -1268,6 +1280,7 @@
       editSecretsEl.value = (album.secrets || []).join('\n');
       editRenameEl.value = '';
       $('saveStatus').textContent = '';
+      $('saveSecretsStatus').textContent = '';
       fillSrcAlbumSelect();
       if (changed) currentStats = null;
       updateEditSecretsHint();
@@ -1286,22 +1299,9 @@
       await refreshFiles();
     }
 
-    async function saveAlbumSettings() {
-      if (!currentEditAlbumId) return;
+    /** PUT the payload to the current album, reload the list and re-open the album (under the new id after a rename). */
+    async function putCurrentAlbum(payload, btn, status) {
       const id = currentEditAlbumId;
-      const btn = $('saveAlbumBtn');
-      const status = $('saveStatus');
-      const secrets = parseSecrets(editSecretsEl.value);
-      const bad = secrets.filter((x) => !isValidSecret(x));
-      if (bad.length) return notify(`Invalid secret: ${bad[0]}. Allowed: a-z A-Z 0-9 _ - (max 256 chars).`, 'error');
-      const weakNew = secrets.filter((x) => isWeakSecret(x) && !editOriginalSecrets.includes(x));
-      if (weakNew.length) return notify(`New secret "${weakNew[0]}" is too short: at least ${MIN_SECRET_LENGTH} characters.`, 'error');
-      if (!secrets.length && !confirm('Save with no secrets? Nobody will be able to open this album until you add one.')) return;
-
-      const payload = { title: editTitleEl.value.trim() || 'OhMyPhoto', secrets };
-      const newId = editRenameEl.value.trim();
-      if (newId && newId !== id) payload.newAlbumId = newId;
-
       btn.disabled = true;
       status.textContent = 'Saving...';
       try {
@@ -1329,6 +1329,27 @@
       } finally {
         btn.disabled = false;
       }
+    }
+
+    /** Share card: saves only the secrets list (title and id untouched). */
+    async function saveAlbumSecrets() {
+      if (!currentEditAlbumId) return;
+      const secrets = parseSecrets(editSecretsEl.value);
+      const bad = secrets.filter((x) => !isValidSecret(x));
+      if (bad.length) return notify(`Invalid secret: ${bad[0]}. Allowed: a-z A-Z 0-9 _ - (max 256 chars).`, 'error');
+      const weakNew = secrets.filter((x) => isWeakSecret(x) && !editOriginalSecrets.includes(x));
+      if (weakNew.length) return notify(`New secret "${weakNew[0]}" is too short: at least ${MIN_SECRET_LENGTH} characters.`, 'error');
+      if (!secrets.length && !confirm('Save with no secrets? Nobody will be able to open this album until you add one.')) return;
+      await putCurrentAlbum({ secrets }, $('saveSecretsBtn'), $('saveSecretsStatus'));
+    }
+
+    /** Settings card: title and optional rename; secrets are managed in the Share card. */
+    async function saveAlbumSettings() {
+      if (!currentEditAlbumId) return;
+      const payload = { title: editTitleEl.value.trim() || 'OhMyPhoto' };
+      const newId = editRenameEl.value.trim();
+      if (newId && newId !== currentEditAlbumId) payload.newAlbumId = newId;
+      await putCurrentAlbum(payload, $('saveAlbumBtn'), $('saveStatus'));
     }
 
     async function deleteCurrentAlbum() {
@@ -1963,6 +1984,7 @@
     $('srcAddBtn').onclick = () => addSelectedFromSrc().catch((e) => { $('srcStatus').textContent = errText(e); });
     $('uploadBtn').onclick = () => uploadSelected().catch((e) => { $('uploadBtn').disabled = false; notify(errText(e), 'error'); });
     $('saveAlbumBtn').onclick = () => saveAlbumSettings().catch((e) => notify(errText(e), 'error'));
+    $('saveSecretsBtn').onclick = () => saveAlbumSecrets().catch((e) => notify(errText(e), 'error'));
     $('deleteAlbumBtn').onclick = () => deleteCurrentAlbum().catch((e) => notify(errText(e), 'error'));
 
     $('createBtn').onclick = async () => {
